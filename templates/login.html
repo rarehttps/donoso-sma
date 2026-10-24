@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ingreso - DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans min-h-screen flex items-center justify-center p-6">
+
+    <div class="w-full max-w-sm">
+        <div class="flex flex-col items-center mb-6">
+            <img src="/static/logo.png" onerror="this.style.display='none'"
+                 class="w-16 h-16 rounded-full object-cover border-2 border-amber-700 mb-3" alt="">
+            <h1 class="text-2xl font-bold text-amber-400">DonOso SMA</h1>
+            <p class="text-xs text-stone-500 mt-1">Ingresa con tu usuario y contrasena</p>
+        </div>
+
+        <form id="form-login" class="bg-stone-900 border border-stone-800 rounded-2xl p-6 space-y-4">
+            <div>
+                <label class="text-xs text-stone-500 block mb-1">Usuario</label>
+                <div class="relative">
+                    <i class="fa-solid fa-user absolute left-3 top-1/2 -translate-y-1/2 text-stone-600 text-sm"></i>
+                    <input id="username" type="text" autocomplete="username" autofocus
+                        class="w-full bg-stone-800 border border-stone-700 rounded-lg pl-9 pr-3 py-2.5 text-sm text-stone-100 focus:border-amber-600 outline-none"
+                        placeholder="ej: admin">
+                </div>
+            </div>
+            <div>
+                <label class="text-xs text-stone-500 block mb-1">Contrasena</label>
+                <div class="relative">
+                    <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-stone-600 text-sm"></i>
+                    <input id="password" type="password" autocomplete="current-password"
+                        class="w-full bg-stone-800 border border-stone-700 rounded-lg pl-9 pr-3 py-2.5 text-sm text-stone-100 focus:border-amber-600 outline-none"
+                        placeholder="********">
+                </div>
+            </div>
+
+            <p id="error" class="hidden text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2"></p>
+
+            <button id="btn" type="submit"
+                class="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 py-2.5 rounded-lg font-bold text-white transition-colors">
+                <i class="fa-solid fa-right-to-bracket mr-1"></i> Entrar
+            </button>
+        </form>
+
+        <p class="text-center text-[11px] text-stone-600 mt-4">
+            Sistema multiagente de gestion del restaurante DonOso
+        </p>
+    </div>
+
+    <script>
+        const form = document.getElementById('form-login');
+        const errorEl = document.getElementById('error');
+        const btn = document.getElementById('btn');
+
+        function mostrarError(msg) {
+            errorEl.textContent = msg;
+            errorEl.classList.remove('hidden');
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorEl.classList.add('hidden');
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            if (!username || !password) { mostrarError('Ingresa usuario y contrasena.'); return; }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Entrando...';
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    window.location.href = data.landing || '/';
+                } else {
+                    mostrarError(data.error || 'No se pudo iniciar sesion.');
+                }
+            } catch (err) {
+                mostrarError('Error de conexion. Verifica que el servidor este corriendo.');
+            }
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-right-to-bracket mr-1"></i> Entrar';
+        });
+    </script>
+</body>
+</html>

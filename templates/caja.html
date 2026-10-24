@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caja - DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans min-h-screen">
+    {% set pagina = 'caja' %}
+{% include 'nav.html' %}
+
+    <main class="p-6 max-w-4xl mx-auto space-y-6">
+        <section>
+            <h2 class="text-lg font-bold text-amber-300 mb-3"><i class="fa-solid fa-receipt mr-2"></i>Listos para cobrar <span id="count" class="text-sm text-stone-500"></span></h2>
+            <div id="lista" class="space-y-3"></div>
+            <div id="ultimo-cobro" class="mt-4"></div>
+        </section>
+
+        <section>
+            <h2 class="text-lg font-bold text-stone-300 mb-3"><i class="fa-solid fa-clock-rotate-left mr-2"></i>Cobrados recientemente <span class="text-xs text-stone-500 font-normal">(por si hay que anular)</span></h2>
+            <div id="lista-recientes" class="space-y-2"></div>
+        </section>
+
+        <section>
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 class="text-lg font-bold text-red-400"><i class="fa-solid fa-rotate-left mr-2"></i>Anulados <span class="text-xs text-stone-500 font-normal">(ultimos 3 dias)</span> <span id="count-anulados" class="text-sm text-stone-500"></span></h2>
+                <a href="/api/export/anulados.xlsx" class="text-xs bg-green-800/40 hover:bg-green-800/70 text-green-300 border border-green-800 px-3 py-1.5 rounded-lg">
+                    <i class="fa-solid fa-file-excel mr-1"></i>Exportar a Excel
+                </a>
+            </div>
+            <div id="lista-anulados" class="space-y-2"></div>
+        </section>
+    </main>
+
+    <script>
+        function formatearItems(items) {
+            return items.map(i => `${i.cantidad}x ${i.nombre}`).join(', ');
+        }
+
+        function tarjeta(p) {
+            return `
+            <div class="bg-stone-900 p-4 rounded-lg border-l-4 border-orange-500 flex justify-between items-center">
+                <div>
+                    <p class="font-bold">Pedido #${p.id}</p>
+                    <p class="text-sm text-stone-400">${formatearItems(p.items)}</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-xl font-bold text-amber-300 mb-2">S/ ${p.total.toFixed(2)}</p>
+                    <button onclick="cobrar(${p.id})" class="bg-orange-600 hover:bg-orange-500 px-4 py-2 rounded-lg text-sm font-bold">
+                        <i class="fa-solid fa-coins mr-1"></i> Cobrar
+                    </button>
+                </div>
+            </div>`;
+        }
+
+        async function cargar() {
+            try {
+                const res = await fetch('/api/caja/pedidos', { cache: 'no-store' });
+                const data = await res.json();
+                document.getElementById('lista').innerHTML = data.listos.length
+                    ? data.listos.map(tarjeta).join('')
+                    : '<p class="text-stone-600 text-sm">No hay pedidos esperando cobro.</p>';
+                document.getElementById('count').textContent = `(${data.listos.length})`;
+            } catch (e) {}
+
+            // Cobrados recientes (para anulaciones)
+            try {
+                const res = await fetch('/api/caja/recientes', { cache: 'no-store' });
+                const data = await res.json();
+                document.getElementById('lista-recientes').innerHTML = data.recientes.length
+                    ? data.recientes.slice(0, 6).map(p => `
+                        <div class="bg-stone-900 border border-stone-800 p-3 rounded-lg flex justify-between items-center text-sm">
+                            <div>
+                                <span class="text-stone-300 font-bold">#${p.id}</span>
+                                <span class="text-stone-500 ml-2">${formatearItems(p.items)}</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-amber-400 font-bold">S/ ${p.total.toFixed(2)}</span>
+                                <button onclick="anular(${p.id})"
+                                    class="text-xs bg-stone-800 hover:bg-red-950 text-stone-400 hover:text-red-400 border border-stone-700 hover:border-red-800 px-3 py-1.5 rounded-lg transition-colors">
+                                    <i class="fa-solid fa-rotate-left mr-1"></i>Anular
+                                </button>
+                            </div>
+                        </div>`).join('')
+                    : '<p class="text-stone-600 text-sm">Sin pedidos cobrados recientes.</p>';
+            } catch (e) {}
+
+            // Anulados (ultimos 3 dias, con su motivo)
+            try {
+                const res = await fetch('/api/caja/anulados', { cache: 'no-store' });
+                const data = await res.json();
+                const anulados = data.anulados || [];
+                document.getElementById('count-anulados').textContent = `(${anulados.length})`;
+                document.getElementById('lista-anulados').innerHTML = anulados.length
+                    ? anulados.map(p => `
+                        <div class="bg-red-950/20 border border-red-900/60 border-l-4 border-l-red-600 p-3 rounded-lg text-sm">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <span class="text-stone-200 font-bold">#${p.id}</span>
+                                    <span class="text-stone-500 ml-2">${formatearItems(p.items)}</span>
+                                </div>
+                                <span class="text-red-300 font-bold">S/ ${p.total.toFixed(2)}</span>
+                            </div>
+                            <div class="mt-1 text-xs text-stone-400">
+                                <i class="fa-solid fa-comment-dots mr-1 text-red-400"></i>Motivo: <span class="text-stone-300">${p.motivo_anulacion}</span>
+                                <span class="text-stone-600 ml-2">· ${p.fecha_cancelado || ''}</span>
+                            </div>
+                        </div>`).join('')
+                    : '<p class="text-stone-600 text-sm">Sin anulaciones en los ultimos 3 dias.</p>';
+            } catch (e) {}
+        }
+
+        async function cobrar(id) {
+            let data;
+            try {
+                const res = await fetch(`/api/caja/cobrar/${id}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                data = await res.json();
+            } catch (e) {
+                donosoToast(`Error al cobrar: ${e.message}. Verifica que el servidor este corriendo.`, 'error');
+                cargar();
+                return;
+            }
+            document.getElementById('ultimo-cobro').innerHTML = `
+                <div class="bg-amber-900/30 border border-amber-700 p-4 rounded-lg text-amber-300 text-sm">
+                    <i class="fa-solid fa-circle-check mr-2"></i>Pedido #${id} cobrado: S/ ${data.total.toFixed(2)}
+                </div>`;
+            cargar();
+        }
+
+        cargar();
+        setInterval(cargar, 2000);
+
+        async function anular(id) {
+            const motivo = await donosoPrompt(`¿Motivo de la anulacion del pedido #${id}?`, { placeholder: 'Ej: plato mal preparado, error de cobro...' });
+            if (motivo === null) return;  // el usuario cancelo
+            try {
+                const res = await fetch(`/api/caja/anular/${id}?motivo=${encodeURIComponent(motivo || 'sin motivo')}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) {
+                    document.getElementById('ultimo-cobro').innerHTML = `
+                        <div class="bg-red-950/40 border border-red-800 p-4 rounded-lg text-red-300 text-sm">
+                            <i class="fa-solid fa-rotate-left mr-2"></i>Pedido #${id} anulado. Motivo: ${motivo || 'sin motivo'}.
+                            Procesar devolucion al cliente.
+                        </div>`;
+                    donosoToast(`Pedido #${id} anulado. Procesar devolucion.`, 'success', 'Anulacion registrada');
+                } else {
+                    donosoToast('No se pudo anular. Solo se pueden anular pedidos ya cobrados.', 'warning');
+                }
+            } catch (e) {
+                donosoToast('Error al anular: ' + e.message, 'error');
+            }
+            cargar();
+        }
+    </script>
+</body>
+</html>

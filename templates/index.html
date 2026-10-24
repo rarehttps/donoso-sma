@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesero - DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans h-screen flex flex-col">
+    {% set pagina = 'mesero' %}
+{% include 'nav.html' %}
+
+    <main class="flex-grow overflow-y-auto p-6 space-y-4" id="chat-box">
+        <div class="bg-stone-900 p-4 rounded-lg max-w-2xl border-l-4 border-amber-500">
+            <p class="text-amber-400 font-bold">Agente Mesero:</p>
+            <p>¡Hola! Soy tu asistente inteligente. Puedo tomar pedidos, consultar el inventario o ayudarte con lo que necesites. ¿Qué deseas hacer hoy?</p>
+        </div>
+    </main>
+
+    <footer class="p-6 bg-stone-900">
+        <div class="max-w-4xl mx-auto flex gap-4">
+            <input type="text" id="user-input" class="flex-grow bg-stone-800 border-none rounded-lg p-4 focus:ring-2 focus:ring-amber-500 outline-none" placeholder="Escribe tu pedido o consulta aquí..." onkeydown="if(event.key==='Enter') sendMessage()">
+            <button id="send-btn" onclick="sendMessage()" class="bg-amber-600 hover:bg-amber-500 px-8 py-4 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                <i class="fa-solid fa-paper-plane"></i>
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        function burbujaUsuario(texto) {
+            return `<div class="bg-stone-800 p-4 rounded-lg max-w-2xl ml-auto text-right border-r-4 border-orange-500">
+                <p class="text-orange-400 font-bold">Tú:</p><p>${texto}</p></div>`;
+        }
+
+        function burbujaAgente(texto) {
+            const html = texto.replace(/\n/g, '<br>');
+            return `<div class="bg-stone-900 p-4 rounded-lg max-w-2xl border-l-4 border-amber-500">
+                <p class="text-amber-400 font-bold">Agente Mesero:</p><p>${html}</p></div>`;
+        }
+
+        function burbujaCargando() {
+            return `<div id="loading-bubble" class="bg-stone-900 p-4 rounded-lg max-w-2xl border-l-4 border-amber-500/50">
+                <p class="text-amber-400 font-bold">Agente Mesero:</p>
+                <p class="text-stone-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Pensando...</p></div>`;
+        }
+
+        async function cargarHistorial() {
+            try {
+                const res = await fetch('/api/mesero/historial', { cache: 'no-store' });
+                const data = await res.json();
+                if (data.historial && data.historial.length) {
+                    const chatBox = document.getElementById('chat-box');
+                    chatBox.innerHTML = '';
+                    for (const turno of data.historial) {
+                        chatBox.innerHTML += burbujaUsuario(turno.input);
+                        chatBox.innerHTML += burbujaAgente(turno.output);
+                    }
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+            } catch (e) {
+                console.warn('No se pudo cargar el historial guardado.', e);
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const btn = document.getElementById('send-btn');
+            const chatBox = document.getElementById('chat-box');
+            if (!input.value.trim()) return;
+
+            const userMsg = input.value;
+            chatBox.innerHTML += burbujaUsuario(userMsg);
+            input.value = '';
+            input.disabled = true;
+            btn.disabled = true;
+            chatBox.innerHTML += burbujaCargando();
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const response = await fetch(`/chat?pregunta=${encodeURIComponent(userMsg)}`);
+                const data = await response.json();
+                document.getElementById('loading-bubble').remove();
+                chatBox.innerHTML += burbujaAgente(data.respuesta);
+            } catch (e) {
+                document.getElementById('loading-bubble').remove();
+                chatBox.innerHTML += burbujaAgente('Hubo un problema de conexion. Intenta de nuevo.');
+            }
+
+            input.disabled = false;
+            btn.disabled = false;
+            input.focus();
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        cargarHistorial();
+
+    </script>
+</body>
+</html>

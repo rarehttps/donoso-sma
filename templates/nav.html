@@ -1,0 +1,324 @@
+{#
+    nav.html — Barra de navegacion COMPARTIDA por los 6 paneles.
+  
+    Antes cada panel tenia su propia barra copiada a mano: por eso cambiaba
+    de tamano entre paginas y a cada una le faltaba su propio enlace (al
+    entrar a Cocina, "Cocina" desaparecia de la barra). Ahora hay un solo
+    archivo: se corrige una vez y se corrige en todos.
+  
+    Uso desde cada panel:
+        {% set pagina = 'cocina' %}
+        {% include 'nav.html' %}
+  #}
+  <script>
+    // Tema (claro/oscuro): se aplica ANTES de pintar para evitar parpadeo.
+    (function(){
+      try { if (localStorage.getItem('donoso-tema') === 'claro') document.documentElement.classList.add('tema-claro'); } catch(e){}
+    })();
+    window.donosoOnTema = window.donosoOnTema || [];
+    function donosoTema(){
+      var claro = document.documentElement.classList.toggle('tema-claro');
+      try { localStorage.setItem('donoso-tema', claro ? 'claro' : 'oscuro'); } catch(e){}
+      _actualizarIconoTema();
+      (window.donosoOnTema || []).forEach(function(f){ try { f(claro); } catch(e){} });
+    }
+    function _actualizarIconoTema(){
+      var i = document.getElementById('icono-tema'); if(!i) return;
+      var claro = document.documentElement.classList.contains('tema-claro');
+      i.className = 'fa-solid ' + (claro ? 'fa-sun' : 'fa-moon');
+    }
+    function temaEsClaro(){ return document.documentElement.classList.contains('tema-claro'); }
+    document.addEventListener('DOMContentLoaded', _actualizarIconoTema);
+  </script>
+  <style>
+    /* ====== Tipografia mas grande y letras mas notorias ====== */
+    html { font-size: 17px; }
+    .text-\[10px\] { font-size: 11px !important; }
+    .text-\[11px\] { font-size: 12.5px !important; }
+
+    /* En OSCURO: subimos el contraste de los grises tenues (nada de gris apagado). */
+    html:not(.tema-claro) .text-stone-600 { color:#d6d3d1 !important; }
+    html:not(.tema-claro) .text-stone-500 { color:#d6d3d1 !important; }
+    html:not(.tema-claro) .text-stone-400 { color:#e7e5e4 !important; }
+    html:not(.tema-claro) .text-stone-300 { color:#f5f5f4 !important; }
+
+    /* ====== TEMA CLARO ====== */
+    html.tema-claro body,
+    html.tema-claro .bg-stone-950 { background-color:#f4f4f5 !important; }
+    html.tema-claro .bg-stone-900 { background-color:#ffffff !important; }
+    html.tema-claro .bg-stone-800,
+    html.tema-claro .bg-stone-800\/60,
+    html.tema-claro .bg-stone-800\/40 { background-color:#ececeb !important; }
+    html.tema-claro .bg-stone-700 { background-color:#e0dedc !important; }
+
+    html.tema-claro .text-stone-100,
+    html.tema-claro .text-stone-200 { color:#1c1917 !important; }
+    html.tema-claro .text-stone-300 { color:#292524 !important; }
+    html.tema-claro .text-stone-400 { color:#3f3b38 !important; }
+    html.tema-claro .text-stone-500 { color:#57534e !important; }
+    html.tema-claro .text-stone-600,
+    html.tema-claro .text-stone-700 { color:#57534e !important; }
+
+    html.tema-claro .border-stone-800,
+    html.tema-claro .border-stone-700,
+    html.tema-claro .border-stone-600 { border-color:#d6d3d1 !important; }
+
+    /* Ambar mas oscuro para que resalte sobre fondo claro */
+    html.tema-claro .text-amber-400,
+    html.tema-claro .text-amber-300 { color:#b45309 !important; }
+    html.tema-claro .text-amber-200 { color:#92400e !important; }
+
+    /* Notificaciones y modales en claro */
+    html.tema-claro .donoso-toast { background:#ffffff !important; border-color:#d6d3d1 !important; box-shadow:0 10px 30px rgba(0,0,0,.15) !important; }
+    html.tema-claro .donoso-modal-fondo > div { background:#ffffff !important; }
+    html.tema-claro input, html.tema-claro select, html.tema-claro textarea { color:#1c1917 !important; }
+    html.tema-claro input::placeholder, html.tema-claro textarea::placeholder { color:#78716c !important; }
+
+    /* Acentos: nada de neón en tema claro (se oscurecen para que resalten) */
+    html.tema-claro .text-green-400, html.tema-claro .text-green-300,
+    html.tema-claro .text-emerald-400, html.tema-claro .text-emerald-300,
+    html.tema-claro .text-emerald-500 { color:#047857 !important; }
+    html.tema-claro .text-yellow-400, html.tema-claro .text-yellow-300 { color:#a16207 !important; }
+    html.tema-claro .text-orange-400, html.tema-claro .text-orange-300 { color:#c2410c !important; }
+    html.tema-claro .text-red-400, html.tema-claro .text-red-300 { color:#b91c1c !important; }
+    html.tema-claro .text-indigo-300, html.tema-claro .text-indigo-400,
+    html.tema-claro .text-blue-400, html.tema-claro .text-blue-300 { color:#1d4ed8 !important; }
+
+    /* Fondos de color oscuros -> versiones claras suaves */
+    html.tema-claro .bg-green-950, html.tema-claro .bg-green-900,
+    html.tema-claro .bg-green-800\/40, html.tema-claro .bg-green-800\/70 { background-color:#dcfce7 !important; }
+    html.tema-claro .bg-red-950, html.tema-claro .bg-red-900, html.tema-claro .bg-red-950\/40 { background-color:#fee2e2 !important; }
+    html.tema-claro .bg-yellow-950, html.tema-claro .bg-yellow-900, html.tema-claro .bg-yellow-950\/40 { background-color:#fef3c7 !important; }
+    html.tema-claro .border-green-800 { border-color:#86efac !important; }
+    html.tema-claro .border-red-800, html.tema-claro .border-red-700, html.tema-claro .border-red-900 { border-color:#fca5a5 !important; }
+    html.tema-claro .border-yellow-800, html.tema-claro .border-yellow-700 { border-color:#fcd34d !important; }
+    html.tema-claro .border-amber-700\/60, html.tema-claro .border-amber-800 { border-color:#f59e0b !important; }
+
+    /* Tarjetas: un poco de sombra en claro para separarlas del fondo */
+    html.tema-claro .bg-stone-900 { box-shadow:0 1px 3px rgba(0,0,0,.06); }
+
+    /* Hover en claro: que NO se ponga oscuro/negro */
+    html.tema-claro .hover\:bg-stone-800:hover,
+    html.tema-claro .hover\:bg-stone-700:hover { background-color:#e2e0dd !important; }
+    html.tema-claro .hover\:bg-red-900:hover, html.tema-claro .hover\:bg-red-950:hover { background-color:#fee2e2 !important; }
+    html.tema-claro .hover\:bg-green-800\/70:hover { background-color:#bbf7d0 !important; }
+    html.tema-claro .hover\:border-red-800:hover, html.tema-claro .hover\:border-red-900:hover { border-color:#fca5a5 !important; }
+    html.tema-claro .hover\:border-stone-600:hover { border-color:#a8a29e !important; }
+
+    /* Botones sólidos de color: mantienen su texto BLANCO también en claro */
+    html.tema-claro .bg-amber-600, html.tema-claro .bg-amber-500,
+    html.tema-claro .bg-orange-600, html.tema-claro .bg-orange-500,
+    html.tema-claro .bg-red-600, html.tema-claro .bg-red-500 { color:#ffffff !important; }
+
+    /* Colores de carga (Baja/Media/Alta) — mismos en toda la app, sin neón en claro */
+    .cm-c-baja { color:#10b981; }
+    .cm-c-media { color:#f59e0b; }
+    .cm-c-alta { color:#2563eb; }
+    html.tema-claro .cm-c-baja { color:#047857 !important; }
+    html.tema-claro .cm-c-media { color:#b45309 !important; }
+    html.tema-claro .cm-c-alta { color:#1d4ed8 !important; }
+  </style>
+  <header class="bg-stone-900 border-b border-stone-800 sticky top-0 z-30">
+    <div class="px-6 h-14 flex items-center justify-between gap-6">
+  
+      <div class="flex items-center gap-3 shrink-0">
+        <img src="/static/logo.png" onerror="this.style.display='none'"
+             class="w-8 h-8 rounded-full object-cover border border-amber-800" alt="">
+        <span class="text-base font-bold text-amber-400 whitespace-nowrap">DonOso SMA</span>
+      </div>
+  
+      {# Paneles visibles segun el rol. Si por algun motivo no llega el
+         contexto, se muestran todos (comportamiento anterior, seguro). #}
+      {% set _paneles = paneles if paneles is defined else ['mesero','cocina','almacen','caja','sla','monitor','admin'] %}
+      <nav class="flex items-center gap-1 overflow-x-auto">
+        {% set enlaces = [
+          ('mesero',  '/',        'fa-comments',        'Mesero'),
+          ('cocina',  '/cocina',  'fa-fire-burner',     'Cocina'),
+          ('almacen', '/almacen', 'fa-boxes-stacked',   'Almacen'),
+          ('caja',    '/caja',    'fa-cash-register',   'Caja'),
+          ('sla',     '/sla',     'fa-gauge-high',      'SLA'),
+          ('monitor', '/monitor', 'fa-wave-square',     'Monitor'),
+          ('admin',   '/admin',   'fa-user-shield',     'Admin')
+        ] %}
+        {% for clave, ruta, icono, titulo in enlaces %}
+          {% if clave in _paneles %}
+          {% if clave == pagina %}
+            <a href="{{ ruta }}" aria-current="page"
+               class="flex items-center gap-2 px-3.5 h-9 rounded-lg text-sm font-medium whitespace-nowrap
+                      bg-amber-500/15 text-amber-300 border border-amber-700/60">
+              <i class="fa-solid {{ icono }} w-4 text-center"></i>{{ titulo }}
+            </a>
+          {% else %}
+            <a href="{{ ruta }}"
+               class="flex items-center gap-2 px-3.5 h-9 rounded-lg text-sm font-medium whitespace-nowrap
+                      text-stone-400 border border-transparent hover:text-amber-300 hover:bg-stone-800
+                      transition-colors">
+              <i class="fa-solid {{ icono }} w-4 text-center"></i>{{ titulo }}
+            </a>
+          {% endif %}
+          {% endif %}
+        {% endfor %}
+      </nav>
+
+      <div class="flex items-center gap-3 shrink-0">
+        <button id="btn-tema" onclick="donosoTema()" title="Cambiar tema (claro/oscuro)"
+                class="flex items-center justify-center text-sm w-8 h-8 rounded-full border border-stone-700 bg-stone-800 text-stone-300 hover:text-amber-300 hover:border-amber-700">
+          <i id="icono-tema" class="fa-solid fa-moon"></i>
+        </button>
+        <span id="nav-estado"
+              class="flex items-center gap-1.5 text-xs px-2.5 h-7 rounded-full border border-stone-700 bg-stone-800 text-stone-400">
+          <i class="fa-solid fa-circle-notch fa-spin"></i><span>conectando</span>
+        </span>
+        {% if usuario is defined and usuario %}
+        <span class="hidden sm:flex items-center gap-1.5 text-xs text-stone-400">
+          <i class="fa-solid fa-circle-user text-stone-500"></i>
+          <span class="font-medium text-stone-300">{{ usuario.nombre }}</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-stone-800 border border-stone-700 text-stone-500 uppercase">{{ usuario.rol }}</span>
+        </span>
+        <button onclick="cerrarSesion()" title="Cerrar sesion"
+                class="flex items-center gap-1.5 text-xs px-2.5 h-7 rounded-full border border-stone-700 bg-stone-800 text-stone-400 hover:text-red-400 hover:border-red-900">
+          <i class="fa-solid fa-right-from-bracket"></i><span class="hidden md:inline">Salir</span>
+        </button>
+        {% endif %}
+      </div>
+
+    </div>
+  </header>
+  <script>
+  async function cerrarSesion() {
+    try { await fetch('/logout', { method: 'POST' }); } catch (e) {}
+    window.location.href = '/login';
+  }
+  </script>
+  
+  <script>
+  // Indicador de conexion, igual en los 6 paneles.
+  (async function estadoNav() {
+    const el = document.getElementById('nav-estado');
+    async function chequear() {
+      try {
+        const r = await fetch('/api/salud', { cache: 'no-store' });
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        const total = Object.keys(d.agentes).length;
+        const vivos = Object.values(d.agentes).filter(a => a.vivo).length;
+        if (vivos === total) {
+          el.className = 'flex items-center gap-1.5 text-xs px-2.5 h-7 rounded-full border border-green-800 bg-green-950 text-green-400';
+          el.innerHTML = '<i class="fa-solid fa-circle-check"></i><span>' + vivos + '/' + total + ' agentes</span>';
+        } else {
+          el.className = 'flex items-center gap-1.5 text-xs px-2.5 h-7 rounded-full border border-yellow-800 bg-yellow-950 text-yellow-400';
+          el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i><span>' + vivos + '/' + total + ' agentes</span>';
+        }
+      } catch (e) {
+        el.className = 'flex items-center gap-1.5 text-xs px-2.5 h-7 rounded-full border border-red-800 bg-red-950 text-red-400';
+        el.innerHTML = '<i class="fa-solid fa-circle-xmark"></i><span>sin conexion</span>';
+      }
+    }
+    chequear();
+    setInterval(chequear, 5000);
+  })();
+  </script>
+
+  <!-- =====================================================================
+       SISTEMA DE NOTIFICACIONES DONOSO (compartido por los 6 paneles)
+       Reemplaza los alert()/confirm()/prompt() nativos por avisos con el
+       estilo de la marca. Disponibles globalmente como:
+         donosoToast(mensaje, tipo, titulo)   tipo: info|success|warning|error
+         await donosoConfirm(mensaje)          -> true/false
+         await donosoPrompt(mensaje, phold)    -> string | null
+  ====================================================================== -->
+  <style>
+    #donoso-toasts { position: fixed; top: 4.25rem; right: 1rem; z-index: 60;
+      display: flex; flex-direction: column; gap: .6rem; width: 22rem; max-width: 92vw; }
+    .donoso-toast { display: flex; gap: .7rem; align-items: flex-start;
+      background: #1c1917; border: 1px solid #292524; border-left-width: 4px;
+      border-radius: .7rem; padding: .8rem .9rem; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+      animation: donosoIn .28s cubic-bezier(.2,.9,.3,1); }
+    .donoso-toast.saliendo { animation: donosoOut .25s ease forwards; }
+    @keyframes donosoIn  { from { opacity:0; transform: translateX(24px) } to { opacity:1; transform:none } }
+    @keyframes donosoOut { to { opacity:0; transform: translateX(24px) } }
+    .donoso-modal-fondo { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center; padding: 1rem;
+      animation: donosoIn .2s ease; }
+  </style>
+  <div id="donoso-toasts"></div>
+  <script>
+  (function () {
+    const ESTILOS = {
+      info:    { color: '#f59e0b', icono: 'fa-circle-info',        titulo: 'DonOso' },
+      success: { color: '#22c55e', icono: 'fa-circle-check',       titulo: 'Listo' },
+      warning: { color: '#eab308', icono: 'fa-triangle-exclamation', titulo: 'Atencion' },
+      error:   { color: '#ef4444', icono: 'fa-circle-exclamation',  titulo: 'Error' },
+      critico: { color: '#dc2626', icono: 'fa-bell',               titulo: 'Alerta critica' },
+    };
+
+    window.donosoToast = function (mensaje, tipo = 'info', titulo = null, duracion = 5000) {
+      const cont = document.getElementById('donoso-toasts');
+      if (!cont) return;
+      const e = ESTILOS[tipo] || ESTILOS.info;
+      const div = document.createElement('div');
+      div.className = 'donoso-toast';
+      div.style.borderLeftColor = e.color;
+      div.innerHTML =
+        '<i class="fa-solid ' + e.icono + ' mt-0.5" style="color:' + e.color + '"></i>' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm font-bold" style="color:' + e.color + '">' + (titulo || e.titulo) + '</p>' +
+          '<p class="text-xs text-stone-300 break-words">' + mensaje + '</p>' +
+        '</div>' +
+        '<button class="text-stone-600 hover:text-stone-300 text-xs">&times;</button>';
+      const cerrar = () => { div.classList.add('saliendo'); setTimeout(() => div.remove(), 250); };
+      div.querySelector('button').onclick = cerrar;
+      cont.appendChild(div);
+      if (duracion > 0) setTimeout(cerrar, duracion);
+      return div;
+    };
+
+    function modal(html) {
+      return new Promise((resolve) => {
+        const fondo = document.createElement('div');
+        fondo.className = 'donoso-modal-fondo';
+        fondo.innerHTML =
+          '<div class="bg-stone-900 border border-stone-800 rounded-2xl p-5 w-full max-w-sm">' + html + '</div>';
+        document.body.appendChild(fondo);
+        resolve(fondo);
+      });
+    }
+
+    window.donosoConfirm = async function (mensaje, { textoOk = 'Confirmar', textoCancel = 'Cancelar' } = {}) {
+      const fondo = await modal(
+        '<div class="flex items-start gap-3 mb-4">' +
+          '<i class="fa-solid fa-circle-question text-amber-400 text-xl mt-0.5"></i>' +
+          '<p class="text-sm text-stone-200">' + mensaje + '</p></div>' +
+        '<div class="flex justify-end gap-2">' +
+          '<button data-no class="px-4 py-2 rounded-lg text-sm bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700">' + textoCancel + '</button>' +
+          '<button data-si class="px-4 py-2 rounded-lg text-sm bg-amber-600 hover:bg-amber-500 font-bold text-white">' + textoOk + '</button>' +
+        '</div>');
+      return new Promise((resolve) => {
+        const fin = (v) => { fondo.remove(); resolve(v); };
+        fondo.querySelector('[data-si]').onclick = () => fin(true);
+        fondo.querySelector('[data-no]').onclick = () => fin(false);
+        fondo.onclick = (ev) => { if (ev.target === fondo) fin(false); };
+      });
+    };
+
+    window.donosoPrompt = async function (mensaje, { placeholder = '', textoOk = 'Aceptar' } = {}) {
+      const fondo = await modal(
+        '<p class="text-sm text-stone-200 mb-3">' + mensaje + '</p>' +
+        '<input data-in type="text" placeholder="' + placeholder + '" ' +
+          'class="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-100 focus:border-amber-600 outline-none mb-4">' +
+        '<div class="flex justify-end gap-2">' +
+          '<button data-no class="px-4 py-2 rounded-lg text-sm bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700">Cancelar</button>' +
+          '<button data-si class="px-4 py-2 rounded-lg text-sm bg-amber-600 hover:bg-amber-500 font-bold text-white">' + textoOk + '</button>' +
+        '</div>');
+      const input = fondo.querySelector('[data-in]');
+      input.focus();
+      return new Promise((resolve) => {
+        const fin = (v) => { fondo.remove(); resolve(v); };
+        fondo.querySelector('[data-si]').onclick = () => fin(input.value);
+        fondo.querySelector('[data-no]').onclick = () => fin(null);
+        input.onkeydown = (ev) => { if (ev.key === 'Enter') fin(input.value); if (ev.key === 'Escape') fin(null); };
+        fondo.onclick = (ev) => { if (ev.target === fondo) fin(null); };
+      });
+    };
+  })();
+  </script>

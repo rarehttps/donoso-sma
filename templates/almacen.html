@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Almacen - DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans min-h-screen">
+    {% set pagina = 'almacen' %}
+{% include 'nav.html' %}
+
+    <main class="p-6 max-w-4xl mx-auto space-y-6">
+        <div class="bg-stone-900 p-5 rounded-lg flex items-center justify-between">
+            <div>
+                <p class="font-bold">Avisos sin revisar: <span id="avisos" class="text-amber-400">0</span></p>
+                <p class="text-sm text-stone-500">Se acumulan cada vez que cocina completa un pedido.</p>
+            </div>
+            <button onclick="revisar()" class="bg-amber-600 hover:bg-amber-500 px-6 py-3 rounded-lg font-bold">
+                <i class="fa-solid fa-magnifying-glass mr-2"></i>Revisar ahora
+            </button>
+        </div>
+
+        <section>
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 class="text-lg font-bold text-amber-300"><i class="fa-solid fa-boxes-stacked mr-2"></i>Inventario completo <span id="count-inv" class="text-sm text-stone-500 font-normal"></span></h2>
+                <span class="text-xs text-stone-500">Edita la cantidad y presiona guardar</span>
+            </div>
+            <div class="bg-stone-900 border border-stone-800 rounded-lg overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-stone-500 border-b border-stone-800 text-xs">
+                            <th class="text-left py-2 px-3 font-medium">Insumo</th>
+                            <th class="text-right py-2 px-2 font-medium">Stock actual</th>
+                            <th class="text-center py-2 px-2 font-medium">Unidad</th>
+                            <th class="text-right py-2 px-2 font-medium">Minimo</th>
+                            <th class="text-left py-2 px-2 font-medium">Vence</th>
+                            <th class="text-center py-2 px-2 font-medium">Estado</th>
+                            <th class="py-2 px-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-inv"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <h2 class="text-lg font-bold text-red-400 mb-3"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Stock bajo el minimo</h2>
+            <div id="lista-bajos" class="space-y-2"></div>
+        </section>
+
+        <section>
+            <h2 class="text-lg font-bold text-yellow-400 mb-3"><i class="fa-solid fa-hourglass-half mr-2"></i>Por vencer (5 dias)</h2>
+            <div id="lista-vencer" class="space-y-2"></div>
+        </section>
+
+        <section>
+            <h2 class="text-lg font-bold text-stone-400 mb-3"><i class="fa-solid fa-clock-rotate-left mr-2"></i>Historial reciente</h2>
+            <div id="lista-historial" class="space-y-2"></div>
+        </section>
+    </main>
+
+    <script>
+        function filaInsumo(i, color) {
+            return `<div class="bg-stone-900 p-3 rounded-lg border-l-4 ${color} text-sm">
+                <span class="font-bold">${i.nombre}</span>
+                ${i.stock_actual !== undefined ? ` - ${i.stock_actual} ${i.unidad_medida} (minimo ${i.stock_minimo})` : ''}
+                ${i.fecha_vencimiento ? ` - vence ${i.fecha_vencimiento}` : ''}
+            </div>`;
+        }
+
+        async function cargar() {
+            try {
+                const res = await fetch('/api/almacen/estado', { cache: 'no-store' });
+                const data = await res.json();
+
+                document.getElementById('avisos').textContent = data.avisos_pendientes;
+
+                document.getElementById('lista-bajos').innerHTML = data.bajos.length
+                    ? data.bajos.map(i => filaInsumo(i, 'border-red-500')).join('')
+                    : '<p class="text-stone-600 text-sm">Nada bajo el minimo.</p>';
+
+                document.getElementById('lista-vencer').innerHTML = data.por_vencer.length
+                    ? data.por_vencer.map(i => filaInsumo(i, 'border-yellow-500')).join('')
+                    : '<p class="text-stone-600 text-sm">Nada por vencer pronto.</p>';
+
+            } catch (e) {
+            }
+
+            try {
+                const res2 = await fetch('/api/almacen/historial', { cache: 'no-store' });
+                const data2 = await res2.json();
+                document.getElementById('lista-historial').innerHTML = (data2.eventos && data2.eventos.length)
+                    ? data2.eventos.map(e => `<div class="bg-stone-900/60 p-3 rounded-lg text-sm text-stone-400">${e.texto}</div>`).join('')
+                    : '<p class="text-stone-600 text-sm">Sin eventos historicos todavia (requiere Ollama corriendo).</p>';
+            } catch (e) {}
+        }
+
+        async function revisar() {
+            try {
+                const res = await fetch('/api/almacen/revisar', { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            } catch (e) {
+                donosoToast(`Error al revisar el stock: ${e.message}. Verifica que el servidor este corriendo.`, 'error');
+            }
+            cargar();
+        }
+
+        // ---- Inventario completo (con edicion de stock) ----
+        let _inventario = [];
+        function estadoStock(i) {
+            if (i.stock_actual <= i.stock_minimo) return ['Bajo', 'bg-red-950 text-red-400 border-red-800'];
+            if (i.stock_actual <= i.stock_minimo * 1.5) return ['Ajustado', 'bg-yellow-950 text-yellow-400 border-yellow-800'];
+            return ['OK', 'bg-green-950 text-green-400 border-green-800'];
+        }
+        async function cargarInventario() {
+            try {
+                const d = await (await fetch('/api/almacen/inventario', { cache: 'no-store' })).json();
+                _inventario = d.insumos || [];
+                document.getElementById('count-inv').textContent = `(${_inventario.length})`;
+                document.getElementById('tbody-inv').innerHTML = _inventario.length
+                    ? _inventario.map((i, idx) => {
+                        const [txt, cls] = estadoStock(i);
+                        return `<tr class="border-b border-stone-800/60 hover:bg-stone-800/30">
+                            <td class="py-2 px-3 text-stone-200 font-medium">${i.nombre}</td>
+                            <td class="py-2 px-2 text-right">
+                                <input id="inv-${idx}" type="number" step="0.01" value="${i.stock_actual}"
+                                    class="w-24 bg-stone-800 border border-stone-700 rounded px-2 py-1 text-right text-stone-100 focus:border-amber-600 outline-none">
+                            </td>
+                            <td class="py-2 px-2 text-center text-stone-500">${i.unidad_medida}</td>
+                            <td class="py-2 px-2 text-right text-stone-500">${i.stock_minimo}</td>
+                            <td class="py-2 px-2 text-stone-500">${i.fecha_vencimiento || '—'}</td>
+                            <td class="py-2 px-2 text-center"><span class="text-[10px] px-2 py-0.5 rounded-full border ${cls}">${txt}</span></td>
+                            <td class="py-2 px-2 text-center">
+                                <button onclick="guardarStock(${idx})" class="text-xs bg-amber-600 hover:bg-amber-500 px-2 py-1 rounded font-bold" title="Guardar">
+                                    <i class="fa-solid fa-floppy-disk"></i>
+                                </button>
+                            </td>
+                        </tr>`;
+                    }).join('')
+                    : '<tr><td colspan="7" class="py-4 text-center text-stone-600">No hay insumos registrados.</td></tr>';
+            } catch (e) {}
+        }
+        async function guardarStock(idx) {
+            const i = _inventario[idx];
+            const val = parseFloat(document.getElementById('inv-' + idx).value);
+            if (isNaN(val)) { donosoToast('Cantidad invalida.', 'warning'); return; }
+            try {
+                const r = await (await fetch('/api/almacen/stock', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nombre: i.nombre, stock_actual: val })
+                })).json();
+                if (r.ok) {
+                    donosoToast(`Stock de ${i.nombre} actualizado a ${val} ${i.unidad_medida}.`, 'success');
+                    cargar(); cargarInventario();
+                } else {
+                    donosoToast('No se pudo guardar: ' + (r.error || ''), 'error');
+                }
+            } catch (e) { donosoToast('Error al guardar: ' + e.message, 'error'); }
+        }
+
+        // Inventario en tiempo real, pero sin pisar una cantidad que estes
+        // editando (si un campo del inventario tiene el foco, no se refresca).
+        function cargarInventarioSeguro() {
+            const a = document.activeElement;
+            if (a && a.id && a.id.startsWith('inv-')) return;
+            cargarInventario();
+        }
+
+        cargar();
+        cargarInventario();
+        setInterval(cargar, 2500);
+        setInterval(cargarInventarioSeguro, 3000);
+    </script>
+</body>
+</html>

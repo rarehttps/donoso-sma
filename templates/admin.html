@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administracion - DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .fila-nueva { animation: entrar .3s ease-out; }
+        @keyframes entrar { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
+        .pulso { animation: pulso 2s ease-in-out infinite; } @keyframes pulso { 0%,100%{opacity:1} 50%{opacity:.5} }
+    </style>
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans min-h-screen">
+    {% set pagina = 'admin' %}
+{% include 'nav.html' %}
+
+<div class="px-6 pt-5 max-w-[1400px] mx-auto">
+    <h1 class="text-xl font-bold text-amber-400 mb-4"><i class="fa-solid fa-user-shield mr-2"></i>Panel administrativo</h1>
+
+    <!-- Pestanas -->
+    <div class="flex gap-2 border-b border-stone-800 mb-5">
+        <button id="tab-agentes" onclick="verTab('agentes')" class="tab px-4 py-2 text-sm font-bold border-b-2 border-amber-500 text-amber-300">
+            <i class="fa-solid fa-robot mr-1"></i>Comportamiento de agentes
+        </button>
+        <button id="tab-carta" onclick="verTab('carta')" class="tab px-4 py-2 text-sm font-bold border-b-2 border-transparent text-stone-400 hover:text-stone-200">
+            <i class="fa-solid fa-utensils mr-1"></i>Carta
+        </button>
+        <button id="tab-insumos" onclick="verTab('insumos')" class="tab px-4 py-2 text-sm font-bold border-b-2 border-transparent text-stone-400 hover:text-stone-200">
+            <i class="fa-solid fa-carrot mr-1"></i>Ingredientes
+        </button>
+        <button id="tab-usuarios" onclick="verTab('usuarios')" class="tab px-4 py-2 text-sm font-bold border-b-2 border-transparent text-stone-400 hover:text-stone-200">
+            <i class="fa-solid fa-users-gear mr-1"></i>Usuarios
+        </button>
+        <button id="tab-carga" onclick="verTab('carga')" class="tab px-4 py-2 text-sm font-bold border-b-2 border-transparent text-stone-400 hover:text-stone-200">
+            <i class="fa-solid fa-brain mr-1"></i>Carga mental
+        </button>
+    </div>
+</div>
+
+<main class="px-6 pb-10 max-w-[1400px] mx-auto">
+
+    <!-- ================= AGENTES ================= -->
+    <section id="sec-agentes">
+        <p class="text-xs text-stone-500 mb-4">Estado y acciones en tiempo real de cada agente SPADE del sistema multiagente.</p>
+        <div id="grid-agentes" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div>
+
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-timeline mr-2 text-amber-400"></i>Linea de tiempo de comportamiento</h2>
+            <div id="timeline" class="space-y-1 max-h-[420px] overflow-y-auto font-mono text-xs pr-1"></div>
+        </div>
+    </section>
+
+    <!-- ================= CARTA ================= -->
+    <section id="sec-carta" class="hidden">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <h2 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-list mr-2 text-amber-400"></i>Carta actual <span id="count-platos" class="text-stone-500"></span></h2>
+            <div class="flex items-center gap-2 flex-wrap">
+                <a href="/api/admin/menu/plantilla.xlsx" class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 text-amber-300 px-3 py-1.5 rounded-lg"><i class="fa-solid fa-download mr-1"></i>Plantilla Excel</a>
+                <label class="text-xs bg-green-800/40 hover:bg-green-800/70 border border-green-800 text-green-300 px-3 py-1.5 rounded-lg cursor-pointer" title="Excel es lo mas fiable; Word/PDF usan el LLM y pueden fallar con formatos raros">
+                    <i class="fa-solid fa-file-import mr-1"></i>Importar (Excel/Word/PDF)
+                    <input type="file" accept=".xlsx,.docx,.pdf" class="hidden" onchange="importarArchivo(this)">
+                </label>
+                <button onclick="nuevoPlato()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-plus mr-1"></i>Nuevo plato</button>
+            </div>
+        </div>
+
+        <!-- Formulario plato (oculto por defecto) -->
+        <div id="form-plato" class="hidden bg-stone-900 border border-amber-800/60 rounded-xl p-5 mb-4">
+            <h3 id="form-plato-titulo" class="text-sm font-bold text-amber-300 mb-3">Nuevo plato</h3>
+            <input type="hidden" id="pl-id">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div><label class="text-[11px] text-stone-500 block mb-1">Nombre</label>
+                    <input id="pl-nombre" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Categoria</label>
+                    <input id="pl-categoria" list="lista-categorias" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600">
+                    <datalist id="lista-categorias"></datalist></div>
+                <div class="md:col-span-2"><label class="text-[11px] text-stone-500 block mb-1">Descripcion (ingredientes)</label>
+                    <input id="pl-descripcion" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Precio (S/)</label>
+                    <input id="pl-precio" type="number" step="0.5" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div class="flex items-end gap-2">
+                    <label class="flex items-center gap-2 text-sm text-stone-300"><input id="pl-disponible" type="checkbox" checked class="accent-amber-600">Disponible</label>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="cerrarFormPlato()" class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-1.5 rounded-lg">Cancelar</button>
+                <button onclick="guardarPlato()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-floppy-disk mr-1"></i>Guardar</button>
+            </div>
+        </div>
+
+        <!-- Editor de receta (que ingredientes usa un plato) -->
+        <div id="form-receta" class="hidden bg-stone-900 border border-blue-800/60 rounded-xl p-5 mb-4">
+            <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+                <h3 class="text-sm font-bold text-blue-300"><i class="fa-solid fa-flask mr-1"></i>Receta de <span id="receta-plato" class="text-stone-100"></span></h3>
+                <button onclick="agregarFilaReceta()" class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-1.5 rounded-lg"><i class="fa-solid fa-plus mr-1"></i>Agregar ingrediente</button>
+            </div>
+            <p class="text-[11px] text-stone-500 mb-3">Define que insumos y cuanto consume el plato. Esto descuenta el stock al completarse y alimenta las respuestas de alergenos.</p>
+            <input type="hidden" id="rc-plato-id">
+            <div id="receta-filas" class="space-y-2"></div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="cerrarReceta()" class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-1.5 rounded-lg">Cancelar</button>
+                <button onclick="guardarReceta()" class="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-floppy-disk mr-1"></i>Guardar receta</button>
+            </div>
+        </div>
+
+        <div class="bg-stone-900 border border-stone-800 rounded-xl overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-stone-500 border-b border-stone-800 text-xs">
+                    <th class="text-left py-2 px-3">Plato</th><th class="text-left py-2 px-2">Categoria</th>
+                    <th class="text-left py-2 px-2">Descripcion</th><th class="text-right py-2 px-2">Precio</th>
+                    <th class="text-center py-2 px-2">Estado</th><th class="py-2 px-2 text-center">Acciones</th>
+                </tr></thead>
+                <tbody id="tbody-platos"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ================= INGREDIENTES / INSUMOS ================= -->
+    <section id="sec-insumos" class="hidden">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <h2 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-carrot mr-2 text-amber-400"></i>Ingredientes / insumos <span id="count-insumos" class="text-stone-500"></span></h2>
+            <button onclick="nuevoInsumo()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-plus mr-1"></i>Nuevo ingrediente</button>
+        </div>
+
+        <div id="form-insumo" class="hidden bg-stone-900 border border-amber-800/60 rounded-xl p-5 mb-4">
+            <h3 id="form-insumo-titulo" class="text-sm font-bold text-amber-300 mb-3">Nuevo ingrediente</h3>
+            <input type="hidden" id="in-id">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div><label class="text-[11px] text-stone-500 block mb-1">Nombre</label>
+                    <input id="in-nombre" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Unidad</label>
+                    <input id="in-unidad" list="lista-unidades" placeholder="kg, lt, unidad..." class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600">
+                    <datalist id="lista-unidades"><option value="unidad"><option value="kg"><option value="lt"><option value="gr"><option value="ml"></datalist></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Proveedor (opcional)</label>
+                    <input id="in-proveedor" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Stock actual</label>
+                    <input id="in-stock" type="number" step="0.01" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Stock minimo</label>
+                    <input id="in-minimo" type="number" step="0.01" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Vencimiento (opcional)</label>
+                    <input id="in-vence" type="date" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="cerrarFormInsumo()" class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-1.5 rounded-lg">Cancelar</button>
+                <button onclick="guardarInsumo()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-floppy-disk mr-1"></i>Guardar</button>
+            </div>
+        </div>
+
+        <div class="bg-stone-900 border border-stone-800 rounded-xl overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-stone-500 border-b border-stone-800 text-xs">
+                    <th class="text-left py-2 px-3">Ingrediente</th><th class="text-center py-2 px-2">Unidad</th>
+                    <th class="text-right py-2 px-2">Stock</th><th class="text-right py-2 px-2">Minimo</th>
+                    <th class="text-left py-2 px-2">Vence</th><th class="text-left py-2 px-2">Proveedor</th>
+                    <th class="py-2 px-2 text-center">Acciones</th>
+                </tr></thead>
+                <tbody id="tbody-insumos"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ================= USUARIOS ================= -->
+    <section id="sec-usuarios" class="hidden">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <h2 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-users mr-2 text-amber-400"></i>Usuarios <span id="count-usuarios" class="text-stone-500"></span></h2>
+            <button onclick="nuevoUsuario()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-user-plus mr-1"></i>Nuevo usuario</button>
+        </div>
+
+        <!-- Mi cuenta: cambiar mi propia contrasena -->
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-4 mb-4">
+            <h3 class="text-xs font-bold text-stone-400 mb-2"><i class="fa-solid fa-user-lock mr-1 text-amber-400"></i>Mi cuenta — cambiar mi contrasena</h3>
+            <div class="flex items-end gap-2 flex-wrap">
+                <div><label class="text-[11px] text-stone-500 block mb-1">Contrasena actual</label>
+                    <input id="mp-actual" type="password" class="bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Nueva contrasena</label>
+                    <input id="mp-nueva" type="password" class="bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <button onclick="cambiarMiPassword()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-key mr-1"></i>Cambiar</button>
+            </div>
+        </div>
+
+        <div id="form-usuario" class="hidden bg-stone-900 border border-amber-800/60 rounded-xl p-5 mb-4">
+            <h3 class="text-sm font-bold text-amber-300 mb-3">Nuevo usuario</h3>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div><label class="text-[11px] text-stone-500 block mb-1">Nombre</label>
+                    <input id="us-nombre" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Usuario</label>
+                    <input id="us-username" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Contrasena</label>
+                    <input id="us-password" type="text" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></div>
+                <div><label class="text-[11px] text-stone-500 block mb-1">Rol</label>
+                    <select id="us-rol" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-amber-600"></select></div>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="cerrarFormUsuario()" class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-1.5 rounded-lg">Cancelar</button>
+                <button onclick="crearUsuario()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold"><i class="fa-solid fa-user-plus mr-1"></i>Crear</button>
+            </div>
+        </div>
+
+        <div class="bg-stone-900 border border-stone-800 rounded-xl overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead><tr class="text-stone-500 border-b border-stone-800 text-xs">
+                    <th class="text-left py-2 px-3">Nombre</th><th class="text-left py-2 px-2">Usuario</th>
+                    <th class="text-left py-2 px-2">Rol</th><th class="text-center py-2 px-2">Activo</th>
+                    <th class="py-2 px-2 text-center">Acciones</th>
+                </tr></thead>
+                <tbody id="tbody-usuarios"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ================= CARGA MENTAL ================= -->
+    <section id="sec-carga" class="hidden">
+        <div class="flex items-start justify-between flex-wrap gap-3 mb-4">
+            <p class="text-xs text-stone-500 max-w-2xl">
+                Carga de trabajo mental del personal, medida por el mismo analisis de los mensajes
+                del chat que alimenta el panel SLA (palabras de urgencia, exclamaciones y mayusculas).
+                Con el uso del asistente multiagente la carga alta fue bajando a lo largo del mes;
+                sube en las horas pico (mas pedidos de lo normal).
+                <button onclick="document.getElementById('cm-criterio').classList.toggle('hidden')"
+                        class="ml-1 text-amber-300 underline decoration-dotted">¿Como se mide?</button>
+            </p>
+            <div class="flex items-center gap-2 flex-wrap justify-end">
+                <select id="cm-rol" onchange="renderCargaMental()" title="Filtrar por rol"
+                        class="bg-stone-800 border border-stone-700 text-stone-200 text-sm rounded-lg px-3 py-1.5">
+                    <option value="todos">Todos los roles</option>
+                    <option value="mesero">Mesero</option>
+                    <option value="cocinero">Cocinero</option>
+                    <option value="cajero">Cajero</option>
+                    <option value="almacenero">Almacenero</option>
+                </select>
+                <select id="cm-fecha" onchange="cmFechaCambio()" title="Filtrar por fecha"
+                        class="bg-stone-800 border border-stone-700 text-stone-200 text-sm rounded-lg px-3 py-1.5">
+                    <option value="todo">Todo el periodo</option>
+                    <option value="mes">Ultimo mes (30 dias)</option>
+                    <option value="semana">Ultima semana</option>
+                    <option value="2dias">Ultimos 2 dias</option>
+                    <option value="4horas">Ultimas 4 horas</option>
+                    <option value="personalizado">Personalizado…</option>
+                </select>
+                <span id="cm-rango" class="hidden items-center gap-1 text-xs">
+                    <input type="date" id="cm-desde" onchange="renderCargaMental()"
+                           class="bg-stone-800 border border-stone-700 text-stone-200 rounded-lg px-2 py-1.5">
+                    <span class="text-stone-500">a</span>
+                    <input type="date" id="cm-hasta" onchange="renderCargaMental()"
+                           class="bg-stone-800 border border-stone-700 text-stone-200 rounded-lg px-2 py-1.5">
+                </span>
+                <a id="cm-exp-filtrado" href="/api/admin/carga-mental/export"
+                   class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 text-amber-300 px-3 py-1.5 rounded-lg">
+                   <i class="fa-solid fa-filter mr-1"></i>Exportar filtrado</a>
+                <a id="cm-exp-todo" href="/api/admin/carga-mental/export"
+                   class="text-xs bg-emerald-800/40 hover:bg-emerald-800/70 border border-emerald-800 text-emerald-300 px-3 py-1.5 rounded-lg">
+                   <i class="fa-solid fa-file-excel mr-1"></i>Exportar todo</a>
+            </div>
+        </div>
+
+        <!-- Criterio de calculo (colapsable) -->
+        <div id="cm-criterio" class="hidden bg-stone-900 border border-stone-800 rounded-xl p-4 mb-5 text-xs text-stone-400 leading-relaxed">
+            <p class="text-stone-300 font-bold mb-2"><i class="fa-solid fa-circle-info mr-1 text-amber-400"></i>¿Como se calcula el nivel?</p>
+            Cada mensaje recibe un <b>puntaje</b>: cada palabra de <b>alta urgencia</b> (urgente, apurense, demora,
+            tardanza, molesto, pesimo, inaceptable…) suma <b>+2</b>; cada palabra de <b>urgencia media</b>
+            (cuanto, falta, todavia, por favor, necesito, pronto…) suma <b>+1</b>; dos o mas signos de
+            exclamacion suman <b>+2</b> (uno solo, +1); y usar <b>mayusculas</b> en mas del 60% del texto suma <b>+2</b>.
+            Segun el puntaje: <span class="text-emerald-400 font-bold">Baja = 0–1</span>,
+            <span class="text-amber-400 font-bold">Media = 2–3</span>,
+            <span class="text-indigo-300 font-bold">Alta = 4 o mas</span>.
+            Es el mismo criterio (agente de analisis de chat) que ves en el panel SLA, por eso los totales cuadran.
+        </div>
+
+        <!-- Sub-pestañas del panel de carga mental -->
+        <div class="flex gap-1 border-b border-stone-800 mb-4 overflow-x-auto">
+            <button id="cmtab-resumen" onclick="verCmSub('resumen')" class="cmtab px-3.5 py-2 text-sm font-bold whitespace-nowrap border-b-2 border-amber-500 text-amber-300"><i class="fa-solid fa-gauge-high mr-1"></i>Resumen general</button>
+            <button id="cmtab-trabajador" onclick="verCmSub('trabajador')" class="cmtab px-3.5 py-2 text-sm font-bold whitespace-nowrap border-b-2 border-transparent text-stone-400 hover:text-stone-200"><i class="fa-solid fa-chart-pie mr-1"></i>Por trabajador</button>
+            <button id="cmtab-mes" onclick="verCmSub('mes')" class="cmtab px-3.5 py-2 text-sm font-bold whitespace-nowrap border-b-2 border-transparent text-stone-400 hover:text-stone-200"><i class="fa-solid fa-calendar-days mr-1"></i>Comparacion mensual</button>
+        </div>
+
+        <!-- ===== SUB: RESUMEN GENERAL ===== -->
+        <div id="cm-sub-resumen">
+            <!-- Tarjetas de resumen (en %, sobre un maximo de 100%) -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-stone-500">Interacciones analizadas</p>
+                    <p id="cm-total" class="text-2xl font-bold text-stone-100">–</p>
+                    <p class="text-[11px] text-stone-600">mensajes del chat evaluados</p>
+                </div>
+                <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-stone-500">Carga baja</p>
+                    <p class="text-2xl font-bold cm-c-baja"><span id="cm-baja-pct">–</span>%</p>
+                    <p class="text-[11px] text-stone-600"><span id="cm-baja">–</span> de <span class="cm-den">–</span> lecturas</p>
+                </div>
+                <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-stone-500">Carga media</p>
+                    <p class="text-2xl font-bold cm-c-media"><span id="cm-media-pct">–</span>%</p>
+                    <p class="text-[11px] text-stone-600"><span id="cm-media">–</span> de <span class="cm-den">–</span> lecturas</p>
+                </div>
+                <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+                    <p class="text-[11px] uppercase tracking-wide text-stone-500">Carga alta</p>
+                    <p class="text-2xl font-bold cm-c-alta"><span id="cm-alta-pct">–</span>%</p>
+                    <p class="text-[11px] text-stone-600"><span id="cm-alta">–</span> de <span class="cm-den">–</span> lecturas</p>
+                </div>
+            </div>
+
+            <!-- Distribucion de la carga (barra 100%) -->
+            <div class="bg-stone-900 border border-stone-800 rounded-xl p-4 mb-5">
+                <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+                    <h2 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-chart-simple mr-2 text-amber-400"></i>Distribucion de la carga <span id="cm-bar-rol" class="text-stone-500 font-normal"></span></h2>
+                    <span class="text-[11px] text-stone-500">escala 0–100%</span>
+                </div>
+                <div class="flex rounded-lg overflow-hidden h-5">
+                    <div id="cm-bar-baja" style="width:0%;background:#10b981" class="h-5 transition-all"></div>
+                    <div id="cm-bar-media" style="width:0%;background:#f59e0b" class="h-5 transition-all"></div>
+                    <div id="cm-bar-alta" style="width:0%;background:#2563eb" class="h-5 transition-all"></div>
+                </div>
+                <div class="flex items-center justify-between flex-wrap gap-2 mt-2 text-[11px]">
+                    <div class="flex items-center gap-3">
+                        <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle" style="background:#10b981"></span> Baja <b id="cm-bar-baja-t" class="cm-c-baja">–</b></span>
+                        <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle" style="background:#f59e0b"></span> Media <b id="cm-bar-media-t" class="cm-c-media">–</b></span>
+                        <span><span class="inline-block w-2.5 h-2.5 rounded-sm align-middle" style="background:#2563eb"></span> Alta <b id="cm-bar-alta-t" class="cm-c-alta">–</b></span>
+                    </div>
+                    <span class="text-stone-500">Total 100%</span>
+                </div>
+            </div>
+
+            <!-- Tendencia de mejora -->
+            <div class="bg-stone-900 border border-stone-800 rounded-xl p-5 mb-5">
+                <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+                    <h2 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-arrow-trend-down mr-2 text-emerald-400"></i>Evolucion de la carga alta (% por dia)</h2>
+                    <span id="cm-mejora" class="text-xs text-emerald-300"></span>
+                </div>
+                <div class="relative h-96"><canvas id="cm-linea"></canvas></div>
+            </div>
+
+            <!-- Resumen por rol -->
+            <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-users-between-lines mr-2 text-amber-400"></i>Resumen por rol</h2>
+            <div id="cm-roles" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2"></div>
+        </div>
+
+        <!-- ===== SUB: POR TRABAJADOR ===== -->
+        <div id="cm-sub-trabajador" class="hidden">
+            <!-- Evolucion de un trabajador (una sola linea, por semana, vs promedio) -->
+            <div class="bg-stone-900 border border-stone-800 rounded-xl p-5 mb-5">
+                <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+                    <h2 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-arrow-trend-down mr-2 text-emerald-400"></i>Evolucion por trabajador (% carga alta, por semana)</h2>
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-stone-400">Ver:</label>
+                        <select id="cm-worker" onchange="renderCargaMental()"
+                                class="bg-stone-800 border border-stone-700 text-stone-200 text-sm rounded-lg px-3 py-1.5 max-w-[240px]">
+                            <option value="">(Promedio general)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="relative h-56"><canvas id="cm-worker-linea"></canvas></div>
+                <p class="text-[11px] text-stone-500 mt-2">Se agrupa por semana para que la linea se lea limpia (por dia, cada trabajador tiene muy pocas lecturas). Al elegir un trabajador, se compara con el promedio general (linea punteada).</p>
+            </div>
+
+            <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+                <h2 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-chart-pie mr-2 text-amber-400"></i>Carga mental por trabajador <span id="cm-grid-count" class="text-stone-500 text-xs"></span></h2>
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-stone-400">Ordenar:</label>
+                    <select id="cm-orden" onchange="renderCargaMental()"
+                            class="bg-stone-800 border border-stone-700 text-stone-200 text-sm rounded-lg px-3 py-1.5">
+                        <option value="alta_desc">Mayor carga alta primero</option>
+                        <option value="alta_asc">Menor carga alta primero</option>
+                        <option value="lecturas_desc">Mas lecturas primero</option>
+                        <option value="nombre_asc">Nombre (A–Z)</option>
+                    </select>
+                </div>
+            </div>
+            <div id="cm-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
+        </div>
+
+        <!-- ===== SUB: COMPARACION MENSUAL ===== -->
+        <div id="cm-sub-mes" class="hidden">
+            <h2 class="text-sm font-bold text-stone-300 mb-1"><i class="fa-solid fa-calendar-days mr-2 text-amber-400"></i>Comparacion de carga mental por mes</h2>
+            <p class="text-xs text-stone-500 mb-4">Cada mes muestra el total de lecturas y el reparto Baja / Media / Alta (la barra suma 100%). Respeta el filtro de rol.</p>
+            <div id="cm-meses" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+            <p id="cm-mes-aviso" class="text-xs text-amber-300 mt-3 hidden"><i class="fa-solid fa-circle-info mr-1"></i>Por ahora tienes datos de un solo mes. Cuando generes la inyeccion de septiembre, aqui apareceran los dos meses lado a lado para compararlos.</p>
+            <div class="bg-stone-900 border border-stone-800 rounded-xl p-5 mt-4">
+                <h3 class="text-sm font-bold text-stone-300 mb-3">% de carga alta por mes</h3>
+                <div class="relative h-56"><canvas id="cm-mes-barras"></canvas></div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+    let ROLES = [];
+    let _tabActivo = 'agentes';
+    // ---------- pestanas ----------
+    function verTab(t) {
+        _tabActivo = t;
+        ['agentes', 'carta', 'insumos', 'usuarios', 'carga'].forEach(x => {
+            document.getElementById('sec-' + x).classList.toggle('hidden', x !== t);
+            const b = document.getElementById('tab-' + x);
+            const activo = x === t;
+            b.className = 'tab px-4 py-2 text-sm font-bold border-b-2 ' +
+                (activo ? 'border-amber-500 text-amber-300' : 'border-transparent text-stone-400 hover:text-stone-200');
+        });
+        if (t === 'carta') cargarMenu();
+        if (t === 'insumos') cargarInsumos();
+        if (t === 'usuarios') cargarUsuarios();
+        if (t === 'carga') cargarCargaMental();
+    }
+
+    // Tiempo real: refresca la pestana activa. Evita pisar lo que el admin
+    // esta editando (formulario abierto o un campo/desplegable enfocado).
+    function _editando() {
+        const forms = ['form-plato', 'form-receta', 'form-insumo', 'form-usuario'];
+        if (forms.some(f => !document.getElementById(f).classList.contains('hidden'))) return true;
+        const a = document.activeElement;
+        return a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
+    }
+    function refrescarTabActiva() {
+        if (_tabActivo === 'agentes') return; // ya tiene su propio intervalo
+        if (_tabActivo === 'carga') return;   // se recarga al entrar (evita repintar los graficos)
+        if (_editando()) return;
+        if (_tabActivo === 'carta') cargarMenu();
+        else if (_tabActivo === 'insumos') cargarInsumos();
+        else if (_tabActivo === 'usuarios') cargarUsuarios();
+    }
+
+    // ---------- CARGA MENTAL ----------
+    let _pies = [];       // instancias Chart de los pasteles por usuario
+    let _linea = null;    // instancia Chart de la linea de tendencia
+    // Paleta ordenada SIN rojo (validada para daltonismo): baja->media->alta.
+    const CM_COLORES = { baja: '#10b981', media: '#f59e0b', alta: '#2563eb' };
+    const CM_LABEL = { baja: 'Baja', media: 'Media', alta: 'Alta' };
+
+    function _iniciales(nombre) {
+        return (nombre || '?').split(/\s+/).slice(0, 2).map(p => p[0] || '').join('').toUpperCase();
+    }
+
+    let _cmData = null;   // { interacciones:[{f,n,r,u}], roles, ultima }
+    let _cmSub = 'resumen';   // sub-pestaña activa: resumen | trabajador | mes
+    let _cmBar = null;        // instancia Chart de la comparacion mensual
+    let _cmWLinea = null;     // instancia Chart de la evolucion por trabajador
+    const _CM_LVL = { bajo: 'baja', medio: 'media', alto: 'alta' };
+
+    function _cmPct(n, total) { return total ? Math.round(1000 * (n || 0) / total) / 10 : 0; }
+
+    function _cmFmt(d) {
+        const p = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+            p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+    }
+
+    // Rango de fechas segun el preset (anclado a la ultima lectura de los datos).
+    function _cmRango() {
+        const preset = document.getElementById('cm-fecha').value;
+        if (preset === 'todo') return { desde: null, hasta: null };
+        if (preset === 'personalizado') {
+            const d = document.getElementById('cm-desde').value, h = document.getElementById('cm-hasta').value;
+            return { desde: d ? d + ' 00:00:00' : null, hasta: h ? h + ' 23:59:59' : null };
+        }
+        const ref = _cmData && _cmData.ultima ? new Date(_cmData.ultima.replace(' ', 'T')) : new Date();
+        const desdeD = new Date(ref);
+        if (preset === 'mes') desdeD.setDate(desdeD.getDate() - 30);
+        else if (preset === 'semana') desdeD.setDate(desdeD.getDate() - 7);
+        else if (preset === '2dias') desdeD.setDate(desdeD.getDate() - 2);
+        else if (preset === '4horas') desdeD.setHours(desdeD.getHours() - 4);
+        return { desde: _cmFmt(desdeD), hasta: _cmFmt(ref) };
+    }
+
+    function cmFechaCambio() {
+        const p = document.getElementById('cm-fecha').value;
+        document.getElementById('cm-rango').style.display = (p === 'personalizado') ? 'inline-flex' : 'none';
+        renderCargaMental();
+    }
+
+    async function cargarCargaMental() {
+        try {
+            const res = await fetch('/api/admin/carga-mental', { cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            _cmData = await res.json();
+        } catch (e) {
+            document.getElementById('cm-grid').innerHTML =
+                '<p class="text-stone-600 text-sm col-span-full">No se pudo cargar la carga mental.</p>';
+            return;
+        }
+        renderCargaMental();
+    }
+
+    function _cmCuenta(rows) {
+        const c = { baja: 0, media: 0, alta: 0, total: 0 };
+        rows.forEach(x => { c[_CM_LVL[x.n]]++; c.total++; });
+        return c;
+    }
+
+    // Filtra por rol + fecha y calcula TODO en el navegador (sin recargar).
+    function renderCargaMental() {
+        if (!_cmData) return;
+        const grid = document.getElementById('cm-grid');
+        const filas = _cmData.interacciones;
+        if (!filas) {
+            grid.innerHTML = '<p class="text-amber-400 text-sm col-span-full">Reinicia el servidor (app_principal.py) para activar los filtros por fecha y orden.</p>';
+            return;
+        }
+        const rol = document.getElementById('cm-rol').value || 'todos';
+        const orden = document.getElementById('cm-orden').value || 'alta_desc';
+        const { desde, hasta } = _cmRango();
+
+        // Enlaces de exportacion: "filtrado" respeta rol+fecha; "todo" sin filtros.
+        const par = [];
+        if (rol !== 'todos') par.push('rol=' + encodeURIComponent(rol));
+        if (desde) par.push('desde=' + encodeURIComponent(desde));
+        if (hasta) par.push('hasta=' + encodeURIComponent(hasta));
+        document.getElementById('cm-exp-filtrado').href =
+            '/api/admin/carga-mental/export' + (par.length ? '?' + par.join('&') : '');
+
+        // Subconjuntos: por fecha (para 'por rol') y por fecha+rol (ambito).
+        const enRango = f => (!desde || f >= desde) && (!hasta || f <= hasta);
+        const filasFecha = filas.filter(x => enRango(x.f));
+        const filasAmbito = (rol === 'todos') ? filasFecha : filasFecha.filter(x => x.r === rol);
+
+        // Tarjetas + barra 100%.
+        const agg = _cmCuenta(filasAmbito);
+        const pB = _cmPct(agg.baja, agg.total), pM = _cmPct(agg.media, agg.total), pA = _cmPct(agg.alta, agg.total);
+        document.getElementById('cm-total').textContent = agg.total;
+        document.getElementById('cm-baja').textContent = agg.baja;
+        document.getElementById('cm-media').textContent = agg.media;
+        document.getElementById('cm-alta').textContent = agg.alta;
+        document.getElementById('cm-baja-pct').textContent = pB;
+        document.getElementById('cm-media-pct').textContent = pM;
+        document.getElementById('cm-alta-pct').textContent = pA;
+        document.querySelectorAll('.cm-den').forEach(el => el.textContent = agg.total);
+
+        // Barra "Distribucion de la carga" (100%): ancho de cada segmento y leyenda.
+        const _barRol = document.getElementById('cm-bar-rol');
+        if (_barRol) _barRol.textContent = (rol && rol !== 'todos') ? '· ' + rol : '· todos los roles';
+        const _setBarW = (id, v) => { const e = document.getElementById(id); if (e) e.style.width = (agg.total ? v : 0) + '%'; };
+        _setBarW('cm-bar-baja', pB); _setBarW('cm-bar-media', pM); _setBarW('cm-bar-alta', pA);
+        const _setBarT = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = (agg.total ? v : 0) + '%'; };
+        _setBarT('cm-bar-baja-t', pB); _setBarT('cm-bar-media-t', pM); _setBarT('cm-bar-alta-t', pA);
+
+        // Resumen por rol (todos los roles, dentro del rango de fechas).
+        const rm = {};
+        filasFecha.forEach(x => {
+            const g = rm[x.r] || (rm[x.r] = { rol: x.r, baja: 0, media: 0, alta: 0, total: 0 });
+            g[_CM_LVL[x.n]]++; g.total++;
+        });
+        const roles = Object.values(rm).sort((a, b) => b.total - a.total);
+        document.getElementById('cm-roles').innerHTML = roles.map(r => {
+            const tot = r.total, seg = (n, c) => tot ? `<div style="width:${100 * n / tot}%;background:${c}" class="h-2"></div>` : '';
+            const activo = rol !== 'todos' && r.rol === rol;
+            return `<div class="bg-stone-900 border ${activo ? 'border-amber-600' : 'border-stone-800'} rounded-xl p-3 cursor-pointer hover:border-stone-600"
+                        onclick="document.getElementById('cm-rol').value='${r.rol}';renderCargaMental()">
+                <div class="flex items-center justify-between mb-1">
+                    <p class="text-xs font-bold text-stone-200 capitalize">${r.rol}</p>
+                    <p class="text-[11px] text-stone-500">${tot} lecturas</p>
+                </div>
+                <div class="flex rounded overflow-hidden mb-1">${seg(r.baja, CM_COLORES.baja)}${seg(r.media, CM_COLORES.media)}${seg(r.alta, CM_COLORES.alta)}</div>
+                <p class="text-[11px] text-stone-400">Alta: <span class="font-bold" style="color:${CM_COLORES.alta}">${_cmPct(r.alta, tot)}%</span></p>
+            </div>`;
+        }).join('') || '<p class="text-stone-600 text-sm col-span-full">Sin datos por rol en este rango.</p>';
+
+        // Serie diaria del ambito (agrupada por dia).
+        const dm = {};
+        filasAmbito.forEach(x => {
+            const day = x.f.slice(0, 10);
+            const g = dm[day] || (dm[day] = { fecha: day, baja: 0, media: 0, alta: 0, total: 0 });
+            g[_CM_LVL[x.n]]++; g.total++;
+        });
+        const dias = Object.values(dm).sort((a, b) => a.fecha < b.fecha ? -1 : 1)
+            .map(d => ({ ...d, pct_alta: _cmPct(d.alta, d.total) }));
+
+        const spanM = document.getElementById('cm-mejora');
+        if (dias.length >= 2) {
+            const ini = dias[0].pct_alta, fin = dias[dias.length - 1].pct_alta;
+            spanM.innerHTML = `<i class="fa-solid fa-circle-check mr-1"></i>Carga alta: ${ini}% al inicio &rarr; ${fin}% al final (&minus;${Math.round((ini - fin) * 10) / 10} pts)`;
+        } else { spanM.textContent = ''; }
+
+        // Colores segun el tema (numeros/ejes mas notorios).
+        const _claro = (typeof temaEsClaro === 'function') && temaEsClaro();
+        const ejeTxt = _claro ? '#292524' : '#e7e5e4';
+        const ejeGrid = _claro ? '#e2e0dd' : '#3a3532';
+        const pieBorde = _claro ? '#ffffff' : '#1c1917';
+
+        // ---- RESUMEN: linea de tendencia ----
+        if (_linea) { _linea.destroy(); _linea = null; }
+        if (_cmSub === 'resumen') {
+            // Eje Y ajustado al rango real de los datos (con margen) para que la
+            // variacion se note y la linea no se vea aplastada contra el 0.
+            const _pa = dias.map(d => d.pct_alta);
+            const _paMax = _pa.length ? Math.max(..._pa) : 100;
+            const _paMin = _pa.length ? Math.min(..._pa) : 0;
+            const _yMax = Math.min(100, Math.ceil((_paMax + 6) / 5) * 5);
+            const _yMin = Math.max(0, Math.floor((_paMin - 6) / 5) * 5);
+            const _yStep = ((_yMax - _yMin) <= 30) ? 5 : 10;
+            _linea = new Chart(document.getElementById('cm-linea'), {
+                type: 'line',
+                data: {
+                    labels: dias.map(d => d.fecha.slice(5)),
+                    datasets: [{
+                        label: '% carga alta', data: dias.map(d => d.pct_alta),
+                        borderColor: CM_COLORES.alta, backgroundColor: 'rgba(37,99,235,.16)',
+                        fill: true, tension: 0.3, pointRadius: 3, borderWidth: 3,
+                        pointBackgroundColor: CM_COLORES.alta,
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { min: _yMin, max: _yMax, ticks: { color: ejeTxt, stepSize: _yStep, font: { size: 13, weight: '600' }, callback: v => v + '%' }, grid: { color: ejeGrid } },
+                        x: { ticks: { color: ejeTxt, maxTicksLimit: 12, font: { size: 12, weight: '600' } }, grid: { display: false } },
+                    },
+                },
+            });
+        }
+
+        // ---- POR TRABAJADOR: pasteles ----
+        _pies.forEach(c => c.destroy());
+        _pies = [];
+        if (_cmWLinea) { _cmWLinea.destroy(); _cmWLinea = null; }
+        if (_cmSub === 'trabajador') {
+            const um = {};
+            filasAmbito.forEach(x => {
+                const g = um[x.u] || (um[x.u] = { trabajador: x.u, rol: x.r, baja: 0, media: 0, alta: 0, total: 0 });
+                g[_CM_LVL[x.n]]++; g.total++;
+            });
+            let usuarios = Object.values(um);
+            const pa = u => _cmPct(u.alta, u.total);
+            if (orden === 'alta_desc') usuarios.sort((a, b) => pa(b) - pa(a) || b.total - a.total);
+            else if (orden === 'alta_asc') usuarios.sort((a, b) => pa(a) - pa(b) || b.total - a.total);
+            else if (orden === 'lecturas_desc') usuarios.sort((a, b) => b.total - a.total);
+            else if (orden === 'nombre_asc') usuarios.sort((a, b) => a.trabajador.localeCompare(b.trabajador));
+
+            // ---- Evolucion por trabajador (una linea, por semana, vs promedio) ----
+            const selEl = document.getElementById('cm-worker');
+            const prevSel = selEl.value;
+            selEl.innerHTML = '<option value="">(Promedio general)</option>' +
+                usuarios.map(u => `<option value="${u.trabajador}">${u.trabajador}</option>`).join('');
+            selEl.value = usuarios.some(u => u.trabajador === prevSel) ? prevSel : '';
+            const selW = selEl.value;
+
+            let d0 = null;
+            if (filasAmbito.length) { const ds = filasAmbito.map(x => x.f.slice(0, 10)).sort(); d0 = new Date(ds[0] + 'T00:00:00'); }
+            const genB = d0 ? _bucketSemanas(filasAmbito, d0) : {};
+            const weeks = Object.keys(genB).map(Number).sort((a, b) => a - b);
+            const semLabels = weeks.map(w => 'Sem ' + (w + 1));
+            const genSerie = weeks.map(w => _cmPct(genB[w].alta, genB[w].total));
+            let dsets;
+            if (selW && d0) {
+                const wB = _bucketSemanas(filasAmbito.filter(x => x.u === selW), d0);
+                const wSerie = weeks.map(w => wB[w] ? _cmPct(wB[w].alta, wB[w].total) : null);
+                dsets = [
+                    { label: selW, data: wSerie, borderColor: CM_COLORES.alta, backgroundColor: 'rgba(37,99,235,.16)', fill: true, tension: 0.3, pointRadius: 4, borderWidth: 3, spanGaps: true, pointBackgroundColor: CM_COLORES.alta },
+                    { label: 'Promedio general', data: genSerie, borderColor: '#9ca3af', borderDash: [5, 4], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                ];
+            } else {
+                dsets = [{ label: '% carga alta (general)', data: genSerie, borderColor: CM_COLORES.alta, backgroundColor: 'rgba(37,99,235,.16)', fill: true, tension: 0.3, pointRadius: 4, borderWidth: 3, pointBackgroundColor: CM_COLORES.alta }];
+            }
+            _cmWLinea = new Chart(document.getElementById('cm-worker-linea'), {
+                type: 'line',
+                data: { labels: semLabels, datasets: dsets },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: !!selW, labels: { color: ejeTxt, boxWidth: 14, font: { size: 12 } } } },
+                    scales: {
+                        y: { min: 0, max: 100, ticks: { color: ejeTxt, stepSize: 20, font: { size: 13, weight: '600' }, callback: v => v + '%' }, grid: { color: ejeGrid } },
+                        x: { ticks: { color: ejeTxt, font: { size: 12, weight: '600' } }, grid: { display: false } },
+                    },
+                },
+            });
+
+            document.getElementById('cm-grid-count').textContent = '(' + usuarios.length + ')';
+            if (!usuarios.length) {
+                grid.innerHTML = '<p class="text-stone-600 text-sm col-span-full">No hay lecturas para este filtro.</p>';
+            } else {
+                grid.innerHTML = usuarios.map((u, i) => `
+                    <div class="bg-stone-900 border border-stone-800 rounded-xl p-4 flex flex-col items-center">
+                        <div class="w-full flex items-center gap-2 mb-2">
+                            <span class="w-7 h-7 rounded-full bg-stone-800 text-amber-300 text-xs font-bold flex items-center justify-center flex-shrink-0">${_iniciales(u.trabajador)}</span>
+                            <div class="min-w-0">
+                                <p class="text-xs font-bold text-stone-200 truncate" title="${u.trabajador}">${u.trabajador}</p>
+                                <p class="text-[10px] text-stone-500 capitalize">${u.rol} · ${u.total} lecturas</p>
+                            </div>
+                        </div>
+                        <div class="relative w-full h-40"><canvas id="pie-${i}"></canvas></div>
+                        <p class="text-[11px] text-stone-400 mt-2">Carga alta: <span class="font-bold" style="color:${CM_COLORES.alta}">${_cmPct(u.alta, u.total)}%</span></p>
+                    </div>`).join('');
+                usuarios.forEach((u, i) => {
+                    const c = new Chart(document.getElementById('pie-' + i), {
+                        type: 'pie',
+                        data: {
+                            labels: ['Baja', 'Media', 'Alta'],
+                            datasets: [{
+                                data: [u.baja || 0, u.media || 0, u.alta || 0],
+                                backgroundColor: [CM_COLORES.baja, CM_COLORES.media, CM_COLORES.alta],
+                                borderColor: pieBorde, borderWidth: 2,
+                            }],
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: { legend: { position: 'bottom', labels: { color: ejeTxt, boxWidth: 12, font: { size: 12 } } } },
+                        },
+                    });
+                    _pies.push(c);
+                });
+            }
+        }
+
+        // ---- COMPARACION MENSUAL ----
+        if (_cmBar) { _cmBar.destroy(); _cmBar = null; }
+        if (_cmSub === 'mes') { _renderMeses(rol, ejeTxt, ejeGrid); }
+    }
+
+    // Sub-pestañas del panel de carga mental.
+    function verCmSub(s) {
+        _cmSub = s;
+        ['resumen', 'trabajador', 'mes'].forEach(x => {
+            document.getElementById('cm-sub-' + x).classList.toggle('hidden', x !== s);
+            const b = document.getElementById('cmtab-' + x);
+            b.className = 'cmtab px-3.5 py-2 text-sm font-bold whitespace-nowrap border-b-2 ' +
+                (x === s ? 'border-amber-500 text-amber-300' : 'border-transparent text-stone-400 hover:text-stone-200');
+        });
+        renderCargaMental();
+    }
+
+    const _CM_MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    function _cmMesLabel(ym) { const p = ym.split('-'); return _CM_MESES[+p[1]] + ' ' + p[0]; }
+
+    // Agrupa filas en semanas de 7 dias contadas desde d0. Devuelve {indiceSemana: {baja,media,alta,total}}.
+    function _bucketSemanas(filas, d0) {
+        const b = {};
+        filas.forEach(x => {
+            const d = new Date(x.f.slice(0, 10) + 'T00:00:00');
+            const w = Math.floor((d - d0) / (7 * 86400000));
+            const g = b[w] || (b[w] = { baja: 0, media: 0, alta: 0, total: 0 });
+            g[_CM_LVL[x.n]]++; g.total++;
+        });
+        return b;
+    }
+
+    // Comparacion de carga mental por mes (respeta el filtro de rol; ignora el rango de fechas).
+    function _renderMeses(rol, ejeTxt, ejeGrid) {
+        const filas = _cmData.interacciones || [];
+        const base = (rol === 'todos') ? filas : filas.filter(x => x.r === rol);
+        const mm = {};
+        base.forEach(x => {
+            const k = x.f.slice(0, 7);
+            const g = mm[k] || (mm[k] = { mes: k, baja: 0, media: 0, alta: 0, total: 0 });
+            g[_CM_LVL[x.n]]++; g.total++;
+        });
+        const meses = Object.values(mm).sort((a, b) => a.mes < b.mes ? -1 : 1);
+        const cont = document.getElementById('cm-meses');
+        cont.innerHTML = meses.map(m => {
+            const pB = _cmPct(m.baja, m.total), pM = _cmPct(m.media, m.total), pA = _cmPct(m.alta, m.total);
+            const seg = (n, c) => m.total ? `<div style="width:${100 * n / m.total}%;background:${c}"></div>` : '';
+            return `<div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-sm font-bold text-stone-200">${_cmMesLabel(m.mes)}</p>
+                    <p class="text-xs text-stone-500">${m.total} lecturas</p>
+                </div>
+                <div class="flex w-full h-5 rounded-lg overflow-hidden bg-stone-800 mb-2">${seg(m.baja, CM_COLORES.baja)}${seg(m.media, CM_COLORES.media)}${seg(m.alta, CM_COLORES.alta)}</div>
+                <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                    <span><i class="fa-solid fa-square mr-1 cm-c-baja"></i>Baja <b>${pB}%</b></span>
+                    <span><i class="fa-solid fa-square mr-1 cm-c-media"></i>Media <b>${pM}%</b></span>
+                    <span><i class="fa-solid fa-square mr-1 cm-c-alta"></i>Alta <b>${pA}%</b></span>
+                </div>
+            </div>`;
+        }).join('') || '<p class="text-stone-600 text-sm">Sin datos de carga mental.</p>';
+
+        document.getElementById('cm-mes-aviso').classList.toggle('hidden', meses.length >= 2);
+
+        if (_cmBar) { _cmBar.destroy(); _cmBar = null; }
+        _cmBar = new Chart(document.getElementById('cm-mes-barras'), {
+            type: 'bar',
+            data: {
+                labels: meses.map(m => _cmMesLabel(m.mes)),
+                datasets: [{
+                    label: '% carga alta', data: meses.map(m => _cmPct(m.alta, m.total)),
+                    backgroundColor: CM_COLORES.alta, borderRadius: 6, maxBarThickness: 90,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { min: 0, max: 100, ticks: { color: ejeTxt, stepSize: 20, font: { size: 13, weight: '600' }, callback: v => v + '%' }, grid: { color: ejeGrid } },
+                    x: { ticks: { color: ejeTxt, font: { size: 12, weight: '600' } }, grid: { display: false } },
+                },
+            },
+        });
+    }
+
+    // ---------- AGENTES ----------
+    const AGENTES = {
+        mesero: { titulo: 'Mesero', icono: 'fa-comments' },
+        cocinero:      { titulo: 'Cocinero',                icono: 'fa-fire-burner' },
+        almacenero:    { titulo: 'Almacenero',             icono: 'fa-boxes-stacked' },
+        cajero:        { titulo: 'Cajero',                 icono: 'fa-cash-register' },
+    };
+    function tarjetaAgente(clave, info, acts) {
+        const vivo = info && info.vivo;
+        const color = vivo ? 'green' : 'red';
+        const meta = AGENTES[clave] || { titulo: clave, icono: 'fa-robot' };
+        const ultimas = acts.filter(a => a.agente === clave).slice(0, 3);
+        const feed = ultimas.length
+            ? ultimas.map(a => `<div class="text-[11px] text-stone-500 truncate"><span class="text-stone-600">${a.hora}</span> ${a.accion}</div>`).join('')
+            : '<div class="text-[11px] text-stone-600">Sin actividad aun.</div>';
+        return `<div class="bg-stone-900 border border-stone-800 rounded-xl p-4 border-l-4 border-l-${color}-600">
+            <div class="flex items-center justify-between mb-1">
+                <span class="text-sm font-bold text-stone-100"><i class="fa-solid ${meta.icono} mr-1 text-stone-500"></i>${meta.titulo}</span>
+                <i class="fa-solid ${vivo ? 'fa-circle-check' : 'fa-circle-xmark'} text-${color}-500"></i>
+            </div>
+            <p class="text-[11px] text-stone-500 mb-2">Reinicios: <span class="${info && info.reinicios > 0 ? 'text-yellow-400' : 'text-stone-400'}">${info ? info.reinicios : 0}</span>
+            ${info && info.fallo_definitivo ? '<span class="text-red-400 ml-1">· requiere intervencion</span>' : ''}</p>
+            <div class="border-t border-stone-800 pt-2 space-y-0.5">${feed}</div>
+        </div>`;
+    }
+    function filaTimeline(a) {
+        const meta = AGENTES[a.agente] || { titulo: a.agente };
+        return `<div class="flex gap-2 py-0.5 fila-nueva">
+            <span class="text-stone-700 w-16 shrink-0">${a.hora}</span>
+            <span class="text-amber-400 w-40 shrink-0 truncate">${meta.titulo}</span>
+            <span class="text-stone-300">${a.accion}</span>
+            <span class="text-stone-600">${a.detalle || ''}</span>
+        </div>`;
+    }
+    let _firmaTimeline = '';
+    async function cargarAgentes() {
+        try {
+            const d = await (await fetch('/api/agentes/actividad', { cache: 'no-store' })).json();
+            if (d.error || !d.agentes) return;
+            const acts = d.actividad || [];
+            document.getElementById('grid-agentes').innerHTML =
+                Object.keys(AGENTES).map(k => tarjetaAgente(k, d.agentes[k], acts)).join('');
+            const firma = JSON.stringify(acts);
+            if (firma !== _firmaTimeline) {
+                _firmaTimeline = firma;
+                document.getElementById('timeline').innerHTML = acts.length
+                    ? acts.map(filaTimeline).join('')
+                    : '<p class="text-stone-600">Sin actividad registrada aun. Genera pedidos para ver el comportamiento.</p>';
+            }
+        } catch (e) {}
+    }
+
+    // ---------- CARTA ----------
+    let _categorias = [];
+    function filaPlato(p) {
+        return `<tr class="border-b border-stone-800/60 hover:bg-stone-800/30 ${p.disponible ? '' : 'opacity-50'}">
+            <td class="py-2 px-3 text-stone-200 font-medium">${p.nombre}</td>
+            <td class="py-2 px-2 text-stone-400">${p.categoria}</td>
+            <td class="py-2 px-2 text-stone-500 text-xs max-w-xs truncate">${p.descripcion || ''}</td>
+            <td class="py-2 px-2 text-right text-amber-400">S/ ${Number(p.precio).toFixed(2)}</td>
+            <td class="py-2 px-2 text-center">${p.disponible
+                ? '<span class="text-[10px] px-2 py-0.5 rounded-full border border-green-800 bg-green-950 text-green-400">Disponible</span>'
+                : '<span class="text-[10px] px-2 py-0.5 rounded-full border border-stone-700 bg-stone-800 text-stone-500">Oculto</span>'}</td>
+            <td class="py-2 px-2 text-center whitespace-nowrap">
+                <button onclick="abrirReceta(${p.id}, '${(p.nombre || '').replace(/'/g, '')}')" class="text-xs text-blue-400 hover:text-blue-300 px-2" title="Receta (ingredientes)"><i class="fa-solid fa-flask"></i></button>
+                <button onclick='editarPlato(${JSON.stringify(p)})' class="text-xs text-amber-400 hover:text-amber-300 px-2" title="Editar"><i class="fa-solid fa-pen"></i></button>
+                <button onclick="eliminarPlato(${p.id}, '${(p.nombre || '').replace(/'/g, '')}')" class="text-xs text-red-400 hover:text-red-300 px-2" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
+            </td>
+        </tr>`;
+    }
+    async function cargarMenu() {
+        try {
+            const d = await (await fetch('/api/admin/menu', { cache: 'no-store' })).json();
+            if (d.error) { donosoToast(d.error, 'error'); return; }
+            _categorias = d.categorias || [];
+            document.getElementById('lista-categorias').innerHTML = _categorias.map(c => `<option value="${c.nombre}">`).join('');
+            document.getElementById('count-platos').textContent = `(${d.platos.length})`;
+            document.getElementById('tbody-platos').innerHTML = d.platos.length
+                ? d.platos.map(filaPlato).join('')
+                : '<tr><td colspan="6" class="py-4 text-center text-stone-600">Sin platos.</td></tr>';
+        } catch (e) {}
+    }
+    function nuevoPlato() {
+        document.getElementById('form-plato-titulo').textContent = 'Nuevo plato';
+        document.getElementById('pl-id').value = '';
+        document.getElementById('pl-nombre').value = '';
+        document.getElementById('pl-categoria').value = '';
+        document.getElementById('pl-descripcion').value = '';
+        document.getElementById('pl-precio').value = '';
+        document.getElementById('pl-disponible').checked = true;
+        document.getElementById('form-plato').classList.remove('hidden');
+    }
+    function editarPlato(p) {
+        document.getElementById('form-plato-titulo').textContent = 'Editar plato #' + p.id;
+        document.getElementById('pl-id').value = p.id;
+        document.getElementById('pl-nombre').value = p.nombre;
+        document.getElementById('pl-categoria').value = p.categoria;
+        document.getElementById('pl-descripcion').value = p.descripcion || '';
+        document.getElementById('pl-precio').value = p.precio;
+        document.getElementById('pl-disponible').checked = !!p.disponible;
+        document.getElementById('form-plato').classList.remove('hidden');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    function cerrarFormPlato() { document.getElementById('form-plato').classList.add('hidden'); }
+    async function guardarPlato() {
+        const id = document.getElementById('pl-id').value;
+        const body = {
+            nombre: document.getElementById('pl-nombre').value.trim(),
+            categoria: document.getElementById('pl-categoria').value.trim(),
+            descripcion: document.getElementById('pl-descripcion').value.trim(),
+            precio: parseFloat(document.getElementById('pl-precio').value),
+            disponible: document.getElementById('pl-disponible').checked,
+        };
+        if (!body.nombre || isNaN(body.precio) || !body.categoria) { donosoToast('Completa nombre, categoria y precio.', 'warning'); return; }
+        const url = id ? '/api/admin/menu/' + id : '/api/admin/menu';
+        try {
+            const r = await (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+            if (r.ok) { donosoToast('Plato guardado.', 'success'); cerrarFormPlato(); cargarMenu(); }
+            else donosoToast('Error: ' + (r.error || ''), 'error');
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+    async function eliminarPlato(id, nombre) {
+        if (!(await donosoConfirm(`Eliminar el plato "${nombre}"?`, { textoOk: 'Eliminar' }))) return;
+        try {
+            const r = await (await fetch('/api/admin/menu/' + id + '/eliminar', { method: 'POST' })).json();
+            if (r.ok) { donosoToast(r.resultado === 'deshabilitado' ? 'Tenia pedidos: se ocultó de la carta.' : 'Plato eliminado.', 'success'); cargarMenu(); }
+            else donosoToast('Error: ' + (r.error || ''), 'error');
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+    function importarArchivo(input) {
+        const file = input.files[0]; if (!file) return;
+        const esDoc = /\.(docx|pdf)$/i.test(file.name);
+        if (esDoc) donosoToast('Leyendo el documento con el LLM, puede tardar unos segundos...', 'info');
+        const reader = new FileReader();
+        reader.onload = async () => {
+            try {
+                const r = await (await fetch('/api/admin/menu/importar', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: reader.result, filename: file.name })
+                })).json();
+                if (r.ok) donosoToast(`Importado (${r.via || 'Excel'}): ${r.creados} nuevos, ${r.actualizados} actualizados${r.errores ? ', ' + r.errores + ' con error' : ''}.`, 'success');
+                else donosoToast('Error al importar: ' + (r.error || ''), 'error');
+                cargarMenu();
+            } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+        };
+        reader.readAsDataURL(file);
+        input.value = '';
+    }
+
+    // ---------- RECETA DE UN PLATO ----------
+    let _insumosParaReceta = [];
+    function opcionesInsumo(sel) {
+        return _insumosParaReceta.map(i => `<option value="${i.id}" ${i.id === sel ? 'selected' : ''}>${i.nombre} (${i.unidad_medida})</option>`).join('');
+    }
+    function filaReceta(insumo_id, cantidad) {
+        const div = document.createElement('div');
+        div.className = 'receta-row flex items-center gap-2';
+        div.innerHTML =
+            `<select class="rc-insumo flex-1 bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-600">${opcionesInsumo(insumo_id)}</select>
+             <input class="rc-cantidad w-28 bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm text-right outline-none focus:border-blue-600" type="number" step="0.001" placeholder="cantidad" value="${cantidad != null ? cantidad : ''}">
+             <button onclick="this.closest('.receta-row').remove()" class="text-red-400 hover:text-red-300 px-2"><i class="fa-solid fa-xmark"></i></button>`;
+        return div;
+    }
+    async function abrirReceta(platoId, nombre) {
+        try {
+            const d = await (await fetch('/api/admin/menu/' + platoId + '/receta', { cache: 'no-store' })).json();
+            if (d.error) { donosoToast(d.error, 'error'); return; }
+            _insumosParaReceta = d.insumos || [];
+            document.getElementById('rc-plato-id').value = platoId;
+            document.getElementById('receta-plato').textContent = nombre;
+            const cont = document.getElementById('receta-filas');
+            cont.innerHTML = '';
+            const receta = d.receta || [];
+            if (receta.length) receta.forEach(r => cont.appendChild(filaReceta(r.insumo_id, r.cantidad_usada)));
+            else cont.appendChild(filaReceta(_insumosParaReceta[0] ? _insumosParaReceta[0].id : null, ''));
+            document.getElementById('form-receta').classList.remove('hidden');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+    function agregarFilaReceta() {
+        document.getElementById('receta-filas').appendChild(filaReceta(_insumosParaReceta[0] ? _insumosParaReceta[0].id : null, ''));
+    }
+    function cerrarReceta() { document.getElementById('form-receta').classList.add('hidden'); }
+    async function guardarReceta() {
+        const platoId = document.getElementById('rc-plato-id').value;
+        const filas = [...document.querySelectorAll('#receta-filas .receta-row')];
+        const items = filas.map(f => ({
+            insumo_id: parseInt(f.querySelector('.rc-insumo').value),
+            cantidad: parseFloat(f.querySelector('.rc-cantidad').value),
+        })).filter(x => x.insumo_id && x.cantidad > 0);
+        try {
+            const r = await (await fetch('/api/admin/menu/' + platoId + '/receta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) })).json();
+            if (r.ok) { donosoToast(`Receta guardada (${r.items} ingredientes).`, 'success'); cerrarReceta(); }
+            else donosoToast('Error: ' + (r.error || ''), 'error');
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+
+    // ---------- INGREDIENTES / INSUMOS ----------
+    function filaInsumo(i) {
+        const bajo = Number(i.stock_actual) <= Number(i.stock_minimo);
+        return `<tr class="border-b border-stone-800/60 hover:bg-stone-800/30">
+            <td class="py-2 px-3 text-stone-200 font-medium">${i.nombre}</td>
+            <td class="py-2 px-2 text-center text-stone-500">${i.unidad_medida}</td>
+            <td class="py-2 px-2 text-right ${bajo ? 'text-red-400' : 'text-stone-300'}">${Number(i.stock_actual)}</td>
+            <td class="py-2 px-2 text-right text-stone-500">${Number(i.stock_minimo)}</td>
+            <td class="py-2 px-2 text-stone-500">${i.fecha_vencimiento || '—'}</td>
+            <td class="py-2 px-2 text-stone-500 text-xs">${i.proveedor || '—'}</td>
+            <td class="py-2 px-2 text-center whitespace-nowrap">
+                <button onclick='editarInsumo(${JSON.stringify(i)})' class="text-xs text-amber-400 hover:text-amber-300 px-2"><i class="fa-solid fa-pen"></i></button>
+                <button onclick="eliminarInsumo(${i.id}, '${(i.nombre || '').replace(/'/g, '')}')" class="text-xs text-red-400 hover:text-red-300 px-2"><i class="fa-solid fa-trash"></i></button>
+            </td>
+        </tr>`;
+    }
+    async function cargarInsumos() {
+        try {
+            const d = await (await fetch('/api/admin/insumos', { cache: 'no-store' })).json();
+            if (d.error) { donosoToast(d.error, 'error'); return; }
+            document.getElementById('count-insumos').textContent = `(${d.insumos.length})`;
+            document.getElementById('tbody-insumos').innerHTML = d.insumos.length
+                ? d.insumos.map(filaInsumo).join('')
+                : '<tr><td colspan="7" class="py-4 text-center text-stone-600">Sin ingredientes.</td></tr>';
+        } catch (e) {}
+    }
+    function nuevoInsumo() {
+        document.getElementById('form-insumo-titulo').textContent = 'Nuevo ingrediente';
+        ['in-id', 'in-nombre', 'in-proveedor', 'in-stock', 'in-minimo', 'in-vence'].forEach(x => document.getElementById(x).value = '');
+        document.getElementById('in-unidad').value = 'unidad';
+        document.getElementById('form-insumo').classList.remove('hidden');
+    }
+    function editarInsumo(i) {
+        document.getElementById('form-insumo-titulo').textContent = 'Editar ingrediente #' + i.id;
+        document.getElementById('in-id').value = i.id;
+        document.getElementById('in-nombre').value = i.nombre;
+        document.getElementById('in-unidad').value = i.unidad_medida;
+        document.getElementById('in-proveedor').value = i.proveedor || '';
+        document.getElementById('in-stock').value = i.stock_actual;
+        document.getElementById('in-minimo').value = i.stock_minimo;
+        document.getElementById('in-vence').value = i.fecha_vencimiento || '';
+        document.getElementById('form-insumo').classList.remove('hidden');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    function cerrarFormInsumo() { document.getElementById('form-insumo').classList.add('hidden'); }
+    async function guardarInsumo() {
+        const id = document.getElementById('in-id').value;
+        const body = {
+            nombre: document.getElementById('in-nombre').value.trim(),
+            unidad_medida: document.getElementById('in-unidad').value.trim() || 'unidad',
+            proveedor: document.getElementById('in-proveedor').value.trim(),
+            stock_actual: parseFloat(document.getElementById('in-stock').value || '0'),
+            stock_minimo: parseFloat(document.getElementById('in-minimo').value || '0'),
+            fecha_vencimiento: document.getElementById('in-vence').value || null,
+        };
+        if (!body.nombre) { donosoToast('El nombre es obligatorio.', 'warning'); return; }
+        const url = id ? '/api/admin/insumos/' + id : '/api/admin/insumos';
+        try {
+            const r = await (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+            if (r.ok) { donosoToast('Ingrediente guardado.', 'success'); cerrarFormInsumo(); cargarInsumos(); }
+            else donosoToast('Error: ' + (r.error || ''), 'error');
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+    async function eliminarInsumo(id, nombre) {
+        if (!(await donosoConfirm(`Eliminar el ingrediente "${nombre}"?`, { textoOk: 'Eliminar' }))) return;
+        try {
+            const r = await (await fetch('/api/admin/insumos/' + id + '/eliminar', { method: 'POST' })).json();
+            if (r.ok) { donosoToast('Ingrediente eliminado.', 'success'); cargarInsumos(); }
+            else donosoToast(r.error || 'No se pudo eliminar.', 'warning');
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+
+    // ---------- USUARIOS ----------
+    function filaUsuario(u) {
+        const opciones = ROLES.map(r => `<option value="${r}" ${r === u.rol ? 'selected' : ''}>${r}</option>`).join('');
+        return `<tr class="border-b border-stone-800/60 hover:bg-stone-800/30 ${u.activo ? '' : 'opacity-50'}">
+            <td class="py-2 px-3 text-stone-200 font-medium">${u.nombre}</td>
+            <td class="py-2 px-2 text-stone-400 font-mono">${u.username || '—'}</td>
+            <td class="py-2 px-2">
+                <select onchange="cambiarRol(${u.id}, this.value)" class="bg-stone-800 border border-stone-700 rounded px-2 py-1 text-xs outline-none focus:border-amber-600">${opciones}</select>
+            </td>
+            <td class="py-2 px-2 text-center">
+                <button onclick="toggleActivo(${u.id}, ${u.activo ? 0 : 1})" class="text-xs px-2 py-0.5 rounded-full border ${u.activo ? 'border-green-800 bg-green-950 text-green-400' : 'border-stone-700 bg-stone-800 text-stone-500'}">${u.activo ? 'Activo' : 'Inactivo'}</button>
+            </td>
+            <td class="py-2 px-2 text-center whitespace-nowrap">
+                <button onclick="resetPassword(${u.id}, '${(u.username || '').replace(/'/g, '')}')" class="text-xs text-amber-400 hover:text-amber-300 px-2"><i class="fa-solid fa-key mr-1"></i>Contrasena</button>
+            </td>
+        </tr>`;
+    }
+    async function cargarUsuarios() {
+        try {
+            const d = await (await fetch('/api/admin/usuarios', { cache: 'no-store' })).json();
+            if (d.error) { donosoToast(d.error, 'error'); return; }
+            ROLES = d.roles || [];
+            document.getElementById('us-rol').innerHTML = ROLES.map(r => `<option value="${r}">${r}</option>`).join('');
+            document.getElementById('count-usuarios').textContent = `(${d.usuarios.length})`;
+            document.getElementById('tbody-usuarios').innerHTML = d.usuarios.map(filaUsuario).join('');
+        } catch (e) {}
+    }
+    function nuevoUsuario() {
+        document.getElementById('us-nombre').value = '';
+        document.getElementById('us-username').value = '';
+        document.getElementById('us-password').value = '';
+        document.getElementById('form-usuario').classList.remove('hidden');
+    }
+    function cerrarFormUsuario() { document.getElementById('form-usuario').classList.add('hidden'); }
+    async function crearUsuario() {
+        const body = {
+            nombre: document.getElementById('us-nombre').value.trim(),
+            username: document.getElementById('us-username').value.trim(),
+            password: document.getElementById('us-password').value,
+            rol: document.getElementById('us-rol').value,
+        };
+        if (!body.nombre || !body.username || !body.password) { donosoToast('Completa nombre, usuario y contrasena.', 'warning'); return; }
+        try {
+            const r = await (await fetch('/api/admin/usuarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+            if (r.ok) { donosoToast('Usuario creado.', 'success'); cerrarFormUsuario(); cargarUsuarios(); }
+            else donosoToast('Error: ' + (r.error || ''), 'error');
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+    async function cambiarRol(id, rol) {
+        const r = await (await fetch('/api/admin/usuarios/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rol }) })).json();
+        donosoToast(r.ok ? 'Rol actualizado.' : ('Error: ' + (r.error || '')), r.ok ? 'success' : 'error');
+    }
+    async function toggleActivo(id, activo) {
+        const r = await (await fetch('/api/admin/usuarios/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activo }) })).json();
+        if (r.ok) cargarUsuarios(); else donosoToast('Error: ' + (r.error || ''), 'error');
+    }
+    async function cambiarMiPassword() {
+        const actual = document.getElementById('mp-actual').value;
+        const nueva = document.getElementById('mp-nueva').value;
+        if (!actual || !nueva) { donosoToast('Completa la contrasena actual y la nueva.', 'warning'); return; }
+        try {
+            const r = await (await fetch('/api/mi-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actual, nueva }) })).json();
+            if (r.ok) {
+                donosoToast('Tu contrasena fue actualizada.', 'success');
+                document.getElementById('mp-actual').value = '';
+                document.getElementById('mp-nueva').value = '';
+            } else donosoToast(r.error || 'No se pudo cambiar.', 'error');
+        } catch (e) { donosoToast('Error: ' + e.message, 'error'); }
+    }
+
+    async function resetPassword(id, username) {
+        const nueva = await donosoPrompt(`Nueva contrasena para "${username}":`, { placeholder: 'nueva contrasena' });
+        if (nueva === null) return;
+        if (!nueva) { donosoToast('La contrasena no puede estar vacia.', 'warning'); return; }
+        const r = await (await fetch('/api/admin/usuarios/' + id + '/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: nueva }) })).json();
+        donosoToast(r.ok ? 'Contrasena actualizada.' : ('Error: ' + (r.error || '')), r.ok ? 'success' : 'error');
+    }
+
+    // init
+    cargarAgentes();
+    setInterval(cargarAgentes, 3000);
+    setInterval(refrescarTabActiva, 4000);
+
+    // Recolorear los gráficos de carga mental al cambiar de tema.
+    (window.donosoOnTema = window.donosoOnTema || []).push(function () {
+        if (_tabActivo === 'carga') renderCargaMental();
+    });
+</script>
+</body>
+</html>

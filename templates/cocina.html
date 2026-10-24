@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cocina - DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans min-h-screen">
+    {% set pagina = 'cocina' %}
+{% include 'nav.html' %}
+
+    <main class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 max-w-6xl mx-auto">
+        <section>
+            <h2 class="text-lg font-bold text-amber-300 mb-3"><i class="fa-solid fa-clock mr-2"></i>Pendientes <span id="count-pendientes" class="text-sm text-stone-500"></span></h2>
+            <div id="lista-pendientes" class="space-y-3"></div>
+        </section>
+        <section>
+            <h2 class="text-lg font-bold text-orange-400 mb-3"><i class="fa-solid fa-fire mr-2"></i>En preparacion <span id="count-preparacion" class="text-sm text-stone-500"></span></h2>
+            <div id="lista-preparacion" class="space-y-3"></div>
+        </section>
+    </main>
+
+    <script>
+        function formatearItems(items) {
+            return items.map(i => `${i.cantidad}x ${i.nombre}`).join(', ');
+        }
+
+        // Pedidos marcados URGENTES por estres alto del cliente (senal del Mesero).
+        let URGENTES = new Set();
+        const _urgNotificados = new Set();
+        function badgeUrgente(p) {
+            return URGENTES.has(p.id)
+                ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white animate-pulse"><i class="fa-solid fa-triangle-exclamation mr-1"></i>URGENTE — apurar</span>'
+                : '';
+        }
+
+        function tarjetaPendiente(p) {
+            const urg = URGENTES.has(p.id);
+            return `
+            <div class="bg-stone-900 p-4 rounded-lg border border-stone-800 border-l-4 ${urg ? 'border-l-red-600 ring-1 ring-red-700/60' : 'border-l-amber-500'}">
+                <p class="font-bold">Pedido #${p.id} <span class="text-stone-500 text-sm font-normal">S/ ${p.total.toFixed(2)}</span>${badgeUrgente(p)}</p>
+                <p class="text-sm text-stone-400 mb-3">${formatearItems(p.items)}</p>
+                <div class="flex gap-2">
+                    <button onclick="iniciar(${p.id})" class="bg-amber-600 hover:bg-amber-500 px-4 py-2 rounded-lg text-sm font-bold flex-grow">
+                        <i class="fa-solid fa-play mr-1"></i> Iniciar preparacion
+                    </button>
+                    <button onclick="cancelar(${p.id})" class="bg-stone-800 hover:bg-red-900 text-red-400 hover:text-red-300 px-3 py-2 rounded-lg text-sm border border-stone-700 hover:border-red-800">
+                        <i class="fa-solid fa-ban"></i>
+                    </button>
+                </div>
+            </div>`;
+        }
+
+        function tarjetaPreparacion(p) {
+            const urg = URGENTES.has(p.id);
+            return `
+            <div class="bg-stone-900 p-4 rounded-lg border border-stone-800 border-l-4 ${urg ? 'border-l-red-600 ring-1 ring-red-700/60' : 'border-l-orange-500'}">
+                <p class="font-bold">Pedido #${p.id} <span class="text-stone-500 text-sm font-normal">S/ ${p.total.toFixed(2)}</span>${badgeUrgente(p)}</p>
+                <p class="text-sm text-stone-400 mb-3">${formatearItems(p.items)}</p>
+                <div class="flex gap-2">
+                    <button onclick="completar(${p.id})" class="bg-orange-600 hover:bg-orange-500 px-4 py-2 rounded-lg text-sm font-bold flex-grow">
+                        <i class="fa-solid fa-check mr-1"></i> Completar pedido
+                    </button>
+                    <button onclick="cancelar(${p.id})" class="bg-stone-800 hover:bg-red-900 text-red-400 hover:text-red-300 px-3 py-2 rounded-lg text-sm border border-stone-700 hover:border-red-800">
+                        <i class="fa-solid fa-ban"></i>
+                    </button>
+                </div>
+            </div>`;
+        }
+
+        async function cargar() {
+            try {
+                const res = await fetch('/api/cocina/pedidos', { cache: 'no-store' });
+                const data = await res.json();
+
+                URGENTES = new Set(data.urgentes || []);
+                (data.urgentes || []).forEach(id => {
+                    if (!_urgNotificados.has(id)) {
+                        _urgNotificados.add(id);
+                        if (window.donosoToast) donosoToast(`El cliente pide APURAR el pedido #${id}.`, 'critico', 'URGENTE en cocina', 9000);
+                    }
+                });
+                for (const id of [..._urgNotificados]) if (!URGENTES.has(id)) _urgNotificados.delete(id);
+
+                const listaP = document.getElementById('lista-pendientes');
+                listaP.innerHTML = data.pendientes.length
+                    ? data.pendientes.map(tarjetaPendiente).join('')
+                    : '<p class="text-stone-600 text-sm">Sin pedidos pendientes.</p>';
+                document.getElementById('count-pendientes').textContent = `(${data.pendientes.length})`;
+
+                const listaE = document.getElementById('lista-preparacion');
+                listaE.innerHTML = data.en_preparacion.length
+                    ? data.en_preparacion.map(tarjetaPreparacion).join('')
+                    : '<p class="text-stone-600 text-sm">Nada en preparacion.</p>';
+                document.getElementById('count-preparacion').textContent = `(${data.en_preparacion.length})`;
+
+            } catch (e) {
+            }
+        }
+
+        async function accion(url, descripcion) {
+            try {
+                const res = await fetch(url, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (data.ok === false) donosoToast(`No se pudo ${descripcion} (el pedido ya esta cerrado o no existe).`, 'warning');
+            } catch (e) {
+                donosoToast(`Error al ${descripcion}: ${e.message}. Verifica que el servidor este corriendo.`, 'error');
+            }
+            cargar();
+        }
+
+        function iniciar(id) { accion(`/api/cocina/iniciar/${id}`, 'iniciar la preparacion'); }
+        function completar(id) { accion(`/api/cocina/completar/${id}`, 'completar el pedido'); }
+        async function cancelar(id) {
+            if (!(await donosoConfirm(`¿Cancelar el pedido #${id}? Esta accion no se puede deshacer.`, { textoOk: 'Cancelar pedido' }))) return;
+            accion(`/api/cocina/cancelar/${id}`, 'cancelar el pedido');
+        }
+
+        cargar();
+        setInterval(cargar, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SLA y Carga mental - DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans min-h-screen">
+    {% set pagina = 'sla' %}
+{% include 'nav.html' %}
+
+    <main class="p-6 max-w-5xl mx-auto space-y-8">
+
+        <section class="bg-stone-900 border border-stone-800 rounded-lg p-4 flex flex-wrap items-end gap-4">
+            <div>
+                <label class="text-xs text-stone-500 block mb-1">Desde</label>
+                <input type="date" id="filtro-desde" class="bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-200">
+            </div>
+            <div>
+                <label class="text-xs text-stone-500 block mb-1">Hasta</label>
+                <input type="date" id="filtro-hasta" class="bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-sm text-stone-200">
+            </div>
+            <button onclick="aplicarFiltro()" class="bg-amber-600 hover:bg-amber-500 px-5 py-2 rounded-lg text-sm font-bold">
+                <i class="fa-solid fa-filter mr-1"></i> Filtrar
+            </button>
+            <button onclick="limpiarFiltro()" class="bg-stone-800 hover:bg-stone-700 px-4 py-2 rounded-lg text-sm border border-stone-700">
+                Limpiar
+            </button>
+            <span class="text-xs text-stone-500 ml-auto" id="rango-activo">Mostrando: todos los datos</span>
+            <a href="/api/export/pedidos" class="bg-stone-800 hover:bg-stone-700 px-4 py-2 rounded-lg text-sm border border-stone-700 text-amber-300">
+                <i class="fa-solid fa-file-csv mr-1"></i> Exportar pedidos
+            </a>
+            <a href="/api/export/estres" class="bg-stone-800 hover:bg-stone-700 px-4 py-2 rounded-lg text-sm border border-stone-700 text-amber-300">
+                <i class="fa-solid fa-file-csv mr-1"></i> Exportar carga mental
+            </a>
+            <a href="/api/export/excel" class="bg-green-800/40 hover:bg-green-800/70 px-4 py-2 rounded-lg text-sm border border-green-800 text-green-300">
+                <i class="fa-solid fa-file-excel mr-1"></i> Exportar todo a Excel
+            </a>
+        </section>
+
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-stone-900 border border-stone-800 rounded-lg p-5">
+                <p class="text-sm text-stone-500 mb-1"><i class="fa-solid fa-stopwatch mr-1"></i> Tiempo de toma (promedio)</p>
+                <div class="flex justify-between items-baseline">
+                    <span class="text-3xl font-bold text-amber-400" id="prom-toma">--</span>
+                    <span class="text-xs text-stone-500">meta: 60s | <span id="muestras-toma">0</span> pedidos</span>
+                </div>
+                <div class="w-full bg-stone-800 rounded-full h-3 overflow-hidden mt-2">
+                    <div id="barra-toma" class="h-3 rounded-full bg-amber-500 transition-all duration-500" style="width: 0%"></div>
+                </div>
+            </div>
+            <div class="bg-stone-900 border border-stone-800 rounded-lg p-5">
+                <p class="text-sm text-stone-500 mb-1"><i class="fa-solid fa-fire mr-1"></i> Tiempo de preparacion (promedio)</p>
+                <div class="flex justify-between items-baseline">
+                    <span class="text-3xl font-bold text-orange-400" id="prom-prep">--</span>
+                    <span class="text-xs text-stone-500">meta: 300s | <span id="muestras-prep">0</span> pedidos</span>
+                </div>
+                <div class="w-full bg-stone-800 rounded-full h-3 overflow-hidden mt-2">
+                    <div id="barra-prep" class="h-3 rounded-full bg-orange-500 transition-all duration-500" style="width: 0%"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-stone-900 border border-stone-800 rounded-lg p-5">
+            <h2 class="text-lg font-bold text-amber-300 mb-1"><i class="fa-solid fa-chart-line mr-2"></i>Serie de tiempo</h2>
+            <p class="text-sm text-stone-500 mb-4">Evolucion de los tiempos pedido a pedido. Util para detectar horarios rush.</p>
+            <div style="height: 280px"><canvas id="grafico-serie"></canvas></div>
+        </section>
+
+        <section class="bg-stone-900 border border-stone-800 rounded-lg p-5">
+            <h2 class="text-lg font-bold text-orange-300 mb-1"><i class="fa-solid fa-chart-column mr-2"></i>Comparativa por pedido</h2>
+            <p class="text-sm text-stone-500 mb-4">Barras lado a lado: toma vs preparacion de cada pedido.</p>
+            <div style="height: 280px"><canvas id="grafico-barras"></canvas></div>
+        </section>
+
+        <section>
+            <h2 class="text-lg font-bold text-red-400 mb-1"><i class="fa-solid fa-brain mr-2"></i>Monitor de carga de trabajo mental (clientes en el chat)</h2>
+            <p class="text-sm text-stone-500 mb-3">Detectada por palabras clave de urgencia en cada mensaje del chat del Mesero.</p>
+            <div class="bg-stone-900 border border-stone-800 rounded-lg p-5">
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                    <div class="bg-stone-800/60 rounded-lg p-3 text-center">
+                        <p class="text-2xl font-bold cm-c-baja" id="count-bajo">0</p>
+                        <p class="text-xs text-stone-500">Baja</p>
+                    </div>
+                    <div class="bg-stone-800/60 rounded-lg p-3 text-center">
+                        <p class="text-2xl font-bold cm-c-media" id="count-medio">0</p>
+                        <p class="text-xs text-stone-500">Media</p>
+                    </div>
+                    <div class="bg-stone-800/60 rounded-lg p-3 text-center">
+                        <p class="text-2xl font-bold cm-c-alta" id="count-alto">0</p>
+                        <p class="text-xs text-stone-500">Alta</p>
+                    </div>
+                </div>
+                <div id="lista-estres" class="space-y-2"></div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const META_TOMA = 60, META_PREP = 300;
+        let filtroDesde = '', filtroHasta = '';
+        let graficoSerie = null, graficoBarras = null;
+
+        Chart.defaults.color = '#a8a29e';
+        Chart.defaults.borderColor = 'rgba(168, 162, 158, 0.15)';
+
+        function fmtSeg(s) {
+            if (s < 60) return `${Math.round(s)}s`;
+            return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+        }
+
+        function colorNivel(nivel) {
+            if (nivel === 'alto')  return 'bg-stone-900 border-stone-800 border-l-4 border-l-blue-600';
+            if (nivel === 'medio') return 'bg-stone-900 border-stone-800 border-l-4 border-l-amber-500';
+            return 'bg-stone-900 border-stone-800 border-l-4 border-l-emerald-500';
+        }
+
+        function aplicarFiltro() {
+            filtroDesde = document.getElementById('filtro-desde').value;
+            filtroHasta = document.getElementById('filtro-hasta').value;
+            const texto = (filtroDesde || filtroHasta)
+                ? `Mostrando: ${filtroDesde || 'inicio'} a ${filtroHasta || 'hoy'}`
+                : 'Mostrando: todos los datos';
+            document.getElementById('rango-activo').textContent = texto;
+            cargarSLA();
+        }
+
+        function limpiarFiltro() {
+            document.getElementById('filtro-desde').value = '';
+            document.getElementById('filtro-hasta').value = '';
+            aplicarFiltro();
+        }
+
+        function urlMetricas() {
+            const params = new URLSearchParams();
+            if (filtroDesde) params.set('desde', filtroDesde);
+            if (filtroHasta) params.set('hasta', filtroHasta);
+            const q = params.toString();
+            return '/api/sla/metricas' + (q ? `?${q}` : '');
+        }
+
+        function dibujarSerie(dToma, dPrep) {
+            const etiquetas = dToma.map(d => `#${d.pedido_id}`);
+            const config = {
+                type: 'line',
+                data: {
+                    labels: etiquetas,
+                    datasets: [
+                        {
+                            label: 'Toma (s)',
+                            data: dToma.map(d => d.segundos),
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                            tension: 0.3,
+                            fill: true,
+                        },
+                        {
+                            label: 'Preparacion (s)',
+                            data: dPrep.map(d => d.segundos),
+                            borderColor: '#f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.12)',
+                            tension: 0.3,
+                            fill: true,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                afterTitle: (items) => {
+                                    const i = items[0].dataIndex;
+                                    return dToma[i] ? dToma[i].fecha : '';
+                                },
+                            },
+                        },
+                    },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'segundos' } } },
+                },
+            };
+            if (graficoSerie) { graficoSerie.data = config.data; graficoSerie.update('none'); }
+            else graficoSerie = new Chart(document.getElementById('grafico-serie'), config);
+        }
+
+        function dibujarBarras(dToma, dPrep) {
+            const etiquetas = dToma.map(d => `#${d.pedido_id}`);
+            const prepPorId = Object.fromEntries(dPrep.map(d => [d.pedido_id, d.segundos]));
+            const config = {
+                type: 'bar',
+                data: {
+                    labels: etiquetas,
+                    datasets: [
+                        { label: 'Toma (s)', data: dToma.map(d => d.segundos), backgroundColor: '#f59e0b' },
+                        { label: 'Preparacion (s)', data: dToma.map(d => prepPorId[d.pedido_id] ?? 0), backgroundColor: '#f97316' },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'segundos' } } },
+                },
+            };
+            if (graficoBarras) { graficoBarras.data = config.data; graficoBarras.update('none'); }
+            else graficoBarras = new Chart(document.getElementById('grafico-barras'), config);
+        }
+
+        // Anti-parpadeo: solo se reescribe el DOM si el contenido cambio.
+        const _firmas = {};
+        function _cambio(clave, valor) {
+            if (_firmas[clave] === valor) return false;
+            _firmas[clave] = valor;
+            return true;
+        }
+
+        async function cargarSLA() {
+            try {
+                const res = await fetch(urlMetricas(), { cache: 'no-store' });
+                const data = await res.json();
+
+                const toma = data.tiempo_toma.promedio_segundos;
+                const prep = data.tiempo_preparacion.promedio_segundos;
+
+                document.getElementById('prom-toma').textContent = toma ? fmtSeg(toma) : 'sin datos';
+                document.getElementById('muestras-toma').textContent = data.tiempo_toma.detalle.length;
+                const pctT = Math.min(100, (toma / META_TOMA) * 100);
+                const bT = document.getElementById('barra-toma');
+                bT.style.width = `${pctT}%`;
+                bT.className = 'h-3 rounded-full transition-all duration-500 ' + (toma > META_TOMA ? 'bg-red-500' : 'bg-amber-500');
+
+                document.getElementById('prom-prep').textContent = prep ? fmtSeg(prep) : 'sin datos';
+                document.getElementById('muestras-prep').textContent = data.tiempo_preparacion.detalle.length;
+                const pctP = Math.min(100, (prep / META_PREP) * 100);
+                const bP = document.getElementById('barra-prep');
+                bP.style.width = `${pctP}%`;
+                bP.className = 'h-3 rounded-full transition-all duration-500 ' + (prep > META_PREP ? 'bg-red-500' : 'bg-orange-500');
+
+                dibujarSerie(data.tiempo_toma.detalle, data.tiempo_preparacion.detalle);
+                dibujarBarras(data.tiempo_toma.detalle, data.tiempo_preparacion.detalle);
+
+            } catch (e) {
+            }
+        }
+
+        async function cargarEstres() {
+            try {
+                const res = await fetch('/api/sla/estres', { cache: 'no-store' });
+                const data = await res.json();
+                document.getElementById('count-bajo').textContent = data.conteo_por_nivel.bajo || 0;
+                document.getElementById('count-medio').textContent = data.conteo_por_nivel.medio || 0;
+                document.getElementById('count-alto').textContent = data.conteo_por_nivel.alto || 0;
+                if (_cambio('estres', JSON.stringify(data.recientes))) document.getElementById('lista-estres').innerHTML = data.recientes.length
+                    ? data.recientes.slice(0, 8).map(r => `
+                        <div class="border rounded-lg p-3 text-sm ${colorNivel(r.nivel)}">
+                            <p class="font-medium">"${r.mensaje}" <span class="text-xs opacity-60 float-right">${r.fecha_hora}</span></p>
+                            ${r.palabras_clave ? `<p class="text-xs opacity-70 mt-1">Senales: ${r.palabras_clave}</p>` : ''}
+                        </div>`).join('')
+                    : '<p class="text-stone-600 text-sm">Aun no hay mensajes analizados.</p>';
+            } catch (e) {}
+        }
+
+        function cargarTodo() { cargarSLA(); cargarEstres(); }
+        cargarTodo();
+        setInterval(cargarTodo, 3000);
+    </script>
+</body>
+</html>

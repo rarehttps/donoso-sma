@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor — DonOso SMA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        /* Sin parpadeo: los valores se actualizan en sitio, con una
+           transicion suave. Nunca se destruye ni recrea un grafico. */
+        .metrica { transition: color .25s ease; }
+        .pulso { animation: pulso 2s ease-in-out infinite; }
+        @keyframes pulso { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+        .fila-nueva { animation: entrar .3s ease-out; }
+        @keyframes entrar { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
+        ::-webkit-scrollbar { width: 8px; height: 8px }
+        ::-webkit-scrollbar-track { background: #1c1917 }
+        ::-webkit-scrollbar-thumb { background: #44403c; border-radius: 4px }
+    </style>
+</head>
+<body class="bg-stone-950 text-stone-100 font-sans min-h-screen">
+
+{% set pagina = 'monitor' %}
+{% include 'nav.html' %}
+
+<div class="px-6 pt-5 pb-1 max-w-[1600px] mx-auto flex items-center justify-between flex-wrap gap-3">
+    <div class="flex items-center gap-3">
+        <h1 class="text-xl font-bold text-stone-100">Monitor del sistema</h1>
+        <span id="badge-estado" class="text-xs px-3 py-1 rounded-full border border-stone-700 bg-stone-800 text-stone-400">
+            <i class="fa-solid fa-circle-notch fa-spin mr-1"></i>conectando
+        </span>
+        <span id="uptime" class="text-xs text-stone-600"></span>
+    </div>
+    <button onclick="reiniciar()"
+        class="flex items-center gap-2 text-xs text-stone-400 hover:text-red-400 border border-stone-800 hover:border-red-900 rounded-lg px-3 h-8 transition-colors">
+        <i class="fa-solid fa-rotate-left"></i> Reiniciar metricas
+    </button>
+</div>
+
+
+<main class="p-6 max-w-[1600px] mx-auto space-y-5">
+
+
+    <div class="pt-2 pb-1 flex items-baseline gap-3 border-b border-stone-800">
+        <span class="flex items-center justify-center w-6 h-6 rounded bg-stone-800 text-amber-500 text-xs font-bold">1</span>
+        <h2 class="text-base font-bold text-stone-200"><i class="fa-solid fa-gauge mr-2 text-stone-600"></i>Estado general</h2>
+        <p class="text-xs text-stone-600">Vista rapida: ¿el sistema esta sano ahora mismo?</p>
+    </div>
+
+    <!-- FILA 1: tarjetas de metricas clave -->
+    <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+            <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Peticiones</p>
+            <p id="m-total" class="metrica text-2xl font-bold text-stone-100">--</p>
+            <p class="text-[11px] text-stone-600">totales</p>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+            <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Tasa de error</p>
+            <p id="m-tasa" class="metrica text-2xl font-bold text-stone-100">--</p>
+            <p class="text-[11px] text-stone-600">4xx + 5xx</p>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-4 border-l-4 border-l-yellow-600">
+            <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Funcionales (4xx)</p>
+            <p id="m-4xx" class="metrica text-2xl font-bold text-yellow-400">--</p>
+            <p class="text-[11px] text-stone-600">uso invalido</p>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-4 border-l-4 border-l-red-700">
+            <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-1">No funcionales (5xx)</p>
+            <p id="m-5xx" class="metrica text-2xl font-bold text-red-400">--</p>
+            <p class="text-[11px] text-stone-600">fallo del sistema</p>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+            <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Latencia p95</p>
+            <p id="m-p95" class="metrica text-2xl font-bold text-amber-400">--</p>
+            <p class="text-[11px] text-stone-600">HTTP</p>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-4">
+            <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Latencia LLM p95</p>
+            <p id="m-llm" class="metrica text-2xl font-bold text-orange-400">--</p>
+            <p class="text-[11px] text-stone-600">inferencia Ollama</p>
+        </div>
+    </section>
+
+
+    <!-- ALERTAS Y UMBRALES -->
+    <div id="alertas-container" class="hidden">
+        <div class="pt-2 pb-1 flex items-baseline gap-3 border-b border-stone-800">
+            <span class="flex items-center justify-center w-6 h-6 rounded bg-red-950 text-red-400 text-xs font-bold"><i class="fa-solid fa-bell"></i></span>
+            <h2 class="text-base font-bold text-red-400">Alertas activas</h2>
+            <p class="text-xs text-stone-600">Metricas que superaron su umbral configurado.</p>
+        </div>
+        <div id="lista-alertas" class="space-y-2 mt-3"></div>
+    </div>
+
+    <!-- CONFIGURACION DE UMBRALES -->
+    <section class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-sliders mr-2 text-amber-400"></i>Umbrales de alerta</h3>
+            <button onclick="guardarUmbrales()" class="text-xs bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg font-bold">
+                <i class="fa-solid fa-floppy-disk mr-1"></i>Guardar
+            </button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+                <label class="text-[11px] text-stone-500 block mb-1">Latencia HTTP p95 (ms)</label>
+                <input id="u-http" type="number" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm text-stone-200 focus:border-amber-600 outline-none" value="3000">
+            </div>
+            <div>
+                <label class="text-[11px] text-stone-500 block mb-1">Latencia LLM p95 (ms)</label>
+                <input id="u-llm" type="number" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm text-stone-200 focus:border-amber-600 outline-none" value="15000">
+            </div>
+            <div>
+                <label class="text-[11px] text-stone-500 block mb-1">Tasa de error total (%)</label>
+                <input id="u-err" type="number" step="0.5" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm text-stone-200 focus:border-amber-600 outline-none" value="10">
+            </div>
+            <div>
+                <label class="text-[11px] text-stone-500 block mb-1">Tasa 5xx (%)</label>
+                <input id="u-5xx" type="number" step="0.5" class="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-sm text-stone-200 focus:border-amber-600 outline-none" value="2">
+            </div>
+        </div>
+    </section>
+
+    <!-- PLAN DE CONTINGENCIA (auto-remediacion) -->
+    <section class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+            <h3 class="text-sm font-bold text-stone-300"><i class="fa-solid fa-shield-halved mr-2 text-amber-400"></i>Plan de contingencia (auto-remediacion)</h3>
+            <div class="flex items-center gap-2">
+                <span class="text-[11px] text-stone-500">Motor LLM:</span>
+                <span id="modelo-actual" class="text-[11px] px-2 py-0.5 rounded-full border border-stone-700 bg-stone-800 text-stone-300">--</span>
+                <button id="btn-notif" onclick="activarNotificaciones()" class="text-[11px] px-2 py-1 rounded-lg border border-stone-700 bg-stone-800 hover:border-amber-700 text-stone-400">
+                    <i class="fa-regular fa-bell mr-1"></i>Notificaciones
+                </button>
+            </div>
+        </div>
+        <p class="text-xs text-stone-600 mb-3">Cuando una alerta llega a estado <span class="text-red-400 font-medium">critico</span>, el sistema ejecuta automaticamente una accion de mitigacion (analogo al supervisor que reinicia agentes caidos).</p>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+                <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-2">Acciones configuradas</p>
+                <div id="tabla-plan" class="space-y-2"><p class="text-xs text-stone-600">Cargando...</p></div>
+            </div>
+            <div>
+                <p class="text-[11px] uppercase tracking-wide text-stone-500 mb-2">Remediaciones ejecutadas</p>
+                <div id="lista-contingencia" class="space-y-2 max-h-[220px] overflow-y-auto pr-1"></div>
+            </div>
+        </div>
+    </section>
+
+    <div class="pt-2 pb-1 flex items-baseline gap-3 border-b border-stone-800">
+        <span class="flex items-center justify-center w-6 h-6 rounded bg-stone-800 text-amber-500 text-xs font-bold">2</span>
+        <h2 class="text-base font-bold text-stone-200"><i class="fa-solid fa-server mr-2 text-stone-600"></i>Agentes y recursos</h2>
+        <p class="text-xs text-stone-600">Que agentes estan vivos y cuanto consume el proceso.</p>
+    </div>
+
+    <!-- FILA 2: salud de agentes + recursos -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div class="lg:col-span-2 bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-heart-pulse mr-2 text-red-400"></i>Salud de los agentes</h2>
+            <div id="grid-agentes" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-microchip mr-2 text-blue-400"></i>Recursos del proceso</h2>
+            <div class="space-y-3">
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-stone-500">CPU</span>
+                        <span id="txt-cpu" class="text-stone-300">--</span>
+                    </div>
+                    <div class="w-full bg-stone-800 rounded-full h-2">
+                        <div id="barra-cpu" class="h-2 rounded-full bg-blue-500 transition-all duration-500" style="width:0%"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-stone-500">Memoria</span>
+                        <span id="txt-mem" class="text-stone-300">--</span>
+                    </div>
+                    <div class="w-full bg-stone-800 rounded-full h-2">
+                        <div id="barra-mem" class="h-2 rounded-full bg-purple-500 transition-all duration-500" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="pt-2 border-t border-stone-800 text-xs text-stone-500">
+                    <span>Fallos del LLM: </span><span id="llm-fallos" class="text-stone-300">0</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+    <div class="pt-2 pb-1 flex items-baseline gap-3 border-b border-stone-800">
+        <span class="flex items-center justify-center w-6 h-6 rounded bg-stone-800 text-amber-500 text-xs font-bold">3</span>
+        <h2 class="text-base font-bold text-stone-200"><i class="fa-solid fa-chart-line mr-2 text-stone-600"></i>Trafico y latencia</h2>
+        <p class="text-xs text-stone-600">Como se comporta el sistema minuto a minuto.</p>
+    </div>
+
+    <!-- FILA 3: graficos -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h2 class="text-sm font-bold text-stone-300 mb-1"><i class="fa-solid fa-chart-column mr-2 text-amber-400"></i>Trafico por minuto</h2>
+            <p class="text-xs text-stone-600 mb-3">Peticiones exitosas frente a errores funcionales y no funcionales.</p>
+            <div style="height:230px"><canvas id="g-trafico"></canvas></div>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h2 class="text-sm font-bold text-stone-300 mb-1"><i class="fa-solid fa-chart-line mr-2 text-orange-400"></i>Latencia p95 por minuto</h2>
+            <p class="text-xs text-stone-600 mb-3">El percentil 95 revela los casos lentos que el promedio esconde.</p>
+            <div style="height:230px"><canvas id="g-latencia"></canvas></div>
+        </div>
+    </section>
+
+
+    <div class="pt-2 pb-1 flex items-baseline gap-3 border-b border-stone-800">
+        <span class="flex items-center justify-center w-6 h-6 rounded bg-stone-800 text-amber-500 text-xs font-bold">4</span>
+        <h2 class="text-base font-bold text-stone-200"><i class="fa-solid fa-triangle-exclamation mr-2 text-stone-600"></i>Errores y codigos HTTP</h2>
+        <p class="text-xs text-stone-600">Funcionales (4xx) = uso invalido. No funcionales (5xx) = fallo real.</p>
+    </div>
+
+    <!-- FILA 4: rutas + errores -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-route mr-2 text-teal-400"></i>Endpoints mas usados</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="text-stone-500 border-b border-stone-800">
+                            <th class="text-left py-2 font-medium">Ruta</th>
+                            <th class="text-right py-2 font-medium">Pet.</th>
+                            <th class="text-right py-2 font-medium">Err.</th>
+                            <th class="text-right py-2 font-medium">p50</th>
+                            <th class="text-right py-2 font-medium">p95</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-rutas"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-triangle-exclamation mr-2 text-red-400"></i>Errores recientes</h2>
+            <div id="lista-errores" class="space-y-2 max-h-[260px] overflow-y-auto pr-1"></div>
+        </div>
+    </section>
+
+
+    <div class="pt-2 pb-1 flex items-baseline gap-3 border-b border-stone-800">
+        <span class="flex items-center justify-center w-6 h-6 rounded bg-stone-800 text-amber-500 text-xs font-bold">5</span>
+        <h2 class="text-base font-bold text-stone-200"><i class="fa-solid fa-terminal mr-2 text-stone-600"></i>Registro de eventos</h2>
+        <p class="text-xs text-stone-600">Bitacora cronologica de lo que ocurre dentro del sistema.</p>
+    </div>
+
+
+    <!-- FILA 4b: distribucion de codigos HTTP -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h3 class="text-sm font-bold text-stone-300 mb-1"><i class="fa-solid fa-chart-pie mr-2 text-amber-400"></i>Distribucion de codigos</h3>
+            <p class="text-xs text-stone-600 mb-3">Proporcion de respuestas por familia.</p>
+            <div style="height:210px"><canvas id="g-codigos"></canvas></div>
+        </div>
+        <div class="lg:col-span-2 bg-stone-900 border border-stone-800 rounded-xl p-5">
+            <h3 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-list-ol mr-2 text-teal-400"></i>Detalle por codigo HTTP</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="text-stone-500 border-b border-stone-800">
+                            <th class="text-left py-2 font-medium">Codigo</th>
+                            <th class="text-left py-2 font-medium">Significado</th>
+                            <th class="text-left py-2 font-medium">Clasificacion</th>
+                            <th class="text-right py-2 font-medium">Cantidad</th>
+                            <th class="text-right py-2 font-medium">% del total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-codigos"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- FILA 5: log de eventos -->
+    <section class="bg-stone-900 border border-stone-800 rounded-xl p-5">
+        <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-terminal mr-2 text-stone-400"></i>Log de eventos del sistema</h2>
+        <div id="lista-eventos" class="space-y-1 max-h-[240px] overflow-y-auto font-mono text-xs pr-1"></div>
+    </section>
+
+</main>
+
+<script>
+// ===================================================================
+// CLAVE ANTI-PARPADEO
+// Los graficos se crean UNA sola vez y despues solo se les reemplazan
+// los datos con chart.update('none'). Nunca se destruyen ni se vuelven
+// a instanciar. El HTML de las tablas solo se reescribe si su contenido
+// cambio de verdad (se compara una firma del contenido).
+// ===================================================================
+const COLORES = { ok:'#15803d', err4:'#ca8a04', err5:'#b91c1c', lat:'#ea580c', rejilla:'#292524', texto:'#78716c' };
+let gTrafico = null, gLatencia = null, gCodigos = null;
+const firmas = {};
+
+function cambio(clave, valor) {
+    if (firmas[clave] === valor) return false;
+    firmas[clave] = valor;
+    return true;
+}
+
+const opcionesBase = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+        legend: { labels: { color: COLORES.texto, font: { size: 10 }, boxWidth: 10 } },
+        tooltip: { backgroundColor: '#1c1917', borderColor: '#44403c', borderWidth: 1 }
+    },
+    scales: {
+        x: { grid: { color: COLORES.rejilla }, ticks: { color: COLORES.texto, font: { size: 9 }, maxTicksLimit: 10 } },
+        y: { grid: { color: COLORES.rejilla }, ticks: { color: COLORES.texto, font: { size: 9 } }, beginAtZero: true }
+    }
+};
+
+function crearGraficos() {
+    gTrafico = new Chart(document.getElementById('g-trafico'), {
+        type: 'bar',
+        data: { labels: [], datasets: [
+            { label: 'OK (2xx)', data: [], backgroundColor: COLORES.ok, stack: 's' },
+            { label: 'Funcional (4xx)', data: [], backgroundColor: COLORES.err4, stack: 's' },
+            { label: 'No funcional (5xx)', data: [], backgroundColor: COLORES.err5, stack: 's' }
+        ]},
+        options: { ...opcionesBase, scales: { ...opcionesBase.scales,
+            x: { ...opcionesBase.scales.x, stacked: true },
+            y: { ...opcionesBase.scales.y, stacked: true } } }
+    });
+
+    gCodigos = new Chart(document.getElementById('g-codigos'), {
+        type: 'doughnut',
+        data: {
+            labels: ['2xx exitosas', '3xx redirecciones', '4xx funcionales', '5xx no funcionales'],
+            data: [],
+            datasets: [{
+                data: [0, 0, 0, 0],
+                backgroundColor: [COLORES.ok, '#0e7490', COLORES.err4, COLORES.err5],
+                borderColor: '#1c1917',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 400 },
+            cutout: '58%',
+            plugins: {
+                legend: { position: 'bottom', labels: { color: COLORES.texto, font: { size: 10 }, boxWidth: 10, padding: 10 } },
+                tooltip: {
+                    backgroundColor: '#1c1917', borderColor: '#44403c', borderWidth: 1,
+                    callbacks: {
+                        label: (ctx) => {
+                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                            const pct = total ? (ctx.parsed / total * 100).toFixed(1) : 0;
+                            return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    gLatencia = new Chart(document.getElementById('g-latencia'), {
+        type: 'line',
+        data: { labels: [], datasets: [
+            { label: 'p95 (ms)', data: [], borderColor: COLORES.lat, backgroundColor: 'rgba(234,88,12,.12)',
+              fill: true, tension: .35, pointRadius: 2, borderWidth: 2 }
+        ]},
+        options: opcionesBase
+    });
+}
+
+function pintarEstado(estado) {
+    const b = document.getElementById('badge-estado');
+    const mapa = {
+        saludable: ['bg-green-950 text-green-400 border-green-800', 'fa-circle-check', 'saludable'],
+        degradado: ['bg-yellow-950 text-yellow-400 border-yellow-800 pulso', 'fa-triangle-exclamation', 'degradado'],
+        critico:   ['bg-red-950 text-red-400 border-red-800 pulso', 'fa-circle-exclamation', 'critico']
+    };
+    const [cls, icono, txt] = mapa[estado] || mapa.degradado;
+    b.className = `text-xs px-3 py-1 rounded-full border ${cls}`;
+    b.innerHTML = `<i class="fa-solid ${icono} mr-1"></i>${txt}`;
+}
+
+function formatearUptime(s) {
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+    return h ? `activo ${h}h ${m}m` : `activo ${m}m ${s%60}s`;
+}
+
+function formatearMs(ms) {
+    return ms >= 1000 ? (ms/1000).toFixed(2) + ' s' : Math.round(ms) + ' ms';
+}
+
+function tarjetaAgente(nombre, info) {
+    const vivo = info.vivo;
+    const color = vivo ? 'green' : 'red';
+    const icono = vivo ? 'fa-circle-check' : 'fa-circle-xmark';
+    return `
+    <div class="bg-stone-950 border border-stone-800 rounded-lg p-3 border-l-4 border-l-${color}-600">
+        <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold capitalize text-stone-200">${nombre}</span>
+            <i class="fa-solid ${icono} text-${color}-500 text-xs"></i>
+        </div>
+        <p class="text-[11px] text-stone-500">Reinicios: <span class="${info.reinicios > 0 ? 'text-yellow-400' : 'text-stone-400'}">${info.reinicios}</span></p>
+        ${info.fallo_definitivo ? '<p class="text-[11px] text-red-400 mt-1">Requiere intervencion</p>' : ''}
+    </div>`;
+}
+
+function filaRuta(r) {
+    const colorErr = r.errores > 0 ? 'text-red-400' : 'text-stone-500';
+    return `<tr class="border-b border-stone-800/60">
+        <td class="py-2 text-stone-300 font-mono text-[11px]">${r.ruta}</td>
+        <td class="py-2 text-right text-stone-400">${r.peticiones}</td>
+        <td class="py-2 text-right ${colorErr}">${r.errores}</td>
+        <td class="py-2 text-right text-stone-500">${formatearMs(r.p50)}</td>
+        <td class="py-2 text-right text-amber-400">${formatearMs(r.p95)}</td>
+    </tr>`;
+}
+
+function filaCodigo(c, total) {
+    const estilos = {
+        ok:           ['text-green-400',  'bg-green-950 text-green-400 border-green-800',   'Exitosa'],
+        funcional:    ['text-yellow-400', 'bg-yellow-950 text-yellow-400 border-yellow-800', 'Funcional (uso)'],
+        no_funcional: ['text-red-400',    'bg-red-950 text-red-400 border-red-800',          'No funcional (sistema)']
+    };
+    const [colorCod, chip, etiqueta] = estilos[c.clase] || estilos.ok;
+    const pct = total ? (c.cantidad / total * 100).toFixed(1) : '0.0';
+    return `<tr class="border-b border-stone-800/60">
+        <td class="py-2 font-mono font-bold ${colorCod}">${c.codigo}</td>
+        <td class="py-2 text-stone-400">${c.significado}</td>
+        <td class="py-2"><span class="text-[10px] px-2 py-0.5 rounded-full border ${chip}">${etiqueta}</span></td>
+        <td class="py-2 text-right text-stone-300">${c.cantidad}</td>
+        <td class="py-2 text-right text-stone-500">${pct}%</td>
+    </tr>`;
+}
+
+function filaError(e) {
+    const esNoFuncional = e.clase === 'no_funcional';
+    const color = esNoFuncional ? 'red' : 'yellow';
+    const etiqueta = esNoFuncional ? 'NO FUNCIONAL' : 'FUNCIONAL';
+    return `<div class="fila-nueva bg-stone-950 border border-stone-800 border-l-2 border-l-${color}-600 rounded p-2 text-xs">
+        <div class="flex justify-between items-center">
+            <span class="font-mono text-stone-300">${e.metodo} ${e.ruta}</span>
+            <span class="text-${color}-400 font-bold">${e.status}</span>
+        </div>
+        <div class="flex justify-between text-[10px] text-stone-600 mt-1">
+            <span>${e.hora} · ${formatearMs(e.ms)}</span>
+            <span class="text-${color}-500">${etiqueta}</span>
+        </div>
+    </div>`;
+}
+
+function filaEvento(e) {
+    const colores = { error: 'text-red-400', warning: 'text-yellow-400', info: 'text-stone-500' };
+    return `<div class="flex gap-2 py-0.5">
+        <span class="text-stone-700">${e.hora}</span>
+        <span class="${colores[e.nivel] || 'text-stone-500'} w-16">[${e.nivel}]</span>
+        <span class="text-stone-600 w-16">${e.origen}</span>
+        <span class="text-stone-400 flex-1">${e.mensaje}</span>
+    </div>`;
+}
+
+async function cargar() {
+    // --- resumen ---
+    try {
+        const r = await (await fetch('/api/monitor/resumen', { cache: 'no-store' })).json();
+
+        pintarEstado(r.estado);
+        document.getElementById('uptime').textContent = formatearUptime(r.uptime_seg);
+        document.getElementById('m-total').textContent = r.peticiones.total;
+        document.getElementById('m-tasa').textContent = r.tasa_error_pct + '%';
+        document.getElementById('m-4xx').textContent = r.peticiones.err_funcional;
+        document.getElementById('m-5xx').textContent = r.peticiones.err_no_funcional;
+        document.getElementById('m-p95').textContent = formatearMs(r.latencia_http.p95);
+        document.getElementById('m-llm').textContent = r.latencia_llm.muestras ? formatearMs(r.latencia_llm.p95) : '—';
+        document.getElementById('llm-fallos').textContent = r.latencia_llm.fallos;
+
+        const cpu = Math.min(100, r.recursos.cpu);
+        document.getElementById('txt-cpu').textContent = cpu.toFixed(1) + '%';
+        document.getElementById('barra-cpu').style.width = cpu + '%';
+        const mem = r.recursos.memoria_mb;
+        document.getElementById('txt-mem').textContent = mem.toFixed(0) + ' MB';
+        document.getElementById('barra-mem').style.width = Math.min(100, mem / 10) + '%';
+
+        const firmaAg = JSON.stringify(r.agentes);
+        if (cambio('agentes', firmaAg)) {
+            document.getElementById('grid-agentes').innerHTML =
+                Object.entries(r.agentes).map(([n, i]) => tarjetaAgente(n, i)).join('');
+        }
+    } catch (e) {
+        pintarEstado('critico');
+    }
+
+    // --- serie temporal (grafico: update, NO recrear) ---
+    try {
+        const s = await (await fetch('/api/monitor/serie', { cache: 'no-store' })).json();
+        if (gTrafico) {
+            gTrafico.data.labels = s.etiquetas;
+            gTrafico.data.datasets[0].data = s.ok;
+            gTrafico.data.datasets[1].data = s.err4xx;
+            gTrafico.data.datasets[2].data = s.err5xx;
+            gTrafico.update('none');   // 'none' = sin re-animar: cero parpadeo
+        }
+        if (gLatencia) {
+            gLatencia.data.labels = s.etiquetas;
+            gLatencia.data.datasets[0].data = s.p95;
+            gLatencia.update('none');
+        }
+    } catch (e) {}
+
+    // --- tablas (solo se reescriben si cambiaron) ---
+    try {
+        const d = await (await fetch('/api/monitor/rutas', { cache: 'no-store' })).json();
+        const f = JSON.stringify(d.rutas);
+        if (cambio('rutas', f)) {
+            document.getElementById('tbody-rutas').innerHTML = d.rutas.length
+                ? d.rutas.map(filaRuta).join('')
+                : '<tr><td colspan="5" class="py-4 text-center text-stone-600">Sin trafico aun.</td></tr>';
+        }
+    } catch (e) {}
+
+    try {
+        const d = await (await fetch('/api/monitor/errores', { cache: 'no-store' })).json();
+        const f = JSON.stringify(d.errores);
+        if (cambio('errores', f)) {
+            document.getElementById('lista-errores').innerHTML = d.errores.length
+                ? d.errores.map(filaError).join('')
+                : '<p class="text-xs text-stone-600 py-4 text-center"><i class="fa-solid fa-circle-check text-green-600 mr-1"></i>Ningun error registrado.</p>';
+        }
+    } catch (e) {}
+
+    // --- codigos HTTP: pastel + tabla ---
+    try {
+        const d = await (await fetch('/api/monitor/codigos', { cache: 'no-store' })).json();
+        if (gCodigos) {
+            const f = d.familias;
+            gCodigos.data.datasets[0].data = [f['2xx'], f['3xx'], f['4xx'], f['5xx']];
+            gCodigos.update('none');
+        }
+        const firma = JSON.stringify(d.detalle);
+        if (cambio('codigos', firma)) {
+            document.getElementById('tbody-codigos').innerHTML = d.detalle.length
+                ? d.detalle.map(c => filaCodigo(c, d.total)).join('')
+                : '<tr><td colspan="5" class="py-4 text-center text-stone-600">Sin peticiones registradas aun.</td></tr>';
+        }
+    } catch (e) {}
+
+    try {
+        const d = await (await fetch('/api/monitor/eventos', { cache: 'no-store' })).json();
+        const f = JSON.stringify(d.eventos);
+        if (cambio('eventos', f)) {
+            document.getElementById('lista-eventos').innerHTML = d.eventos.length
+                ? d.eventos.map(filaEvento).join('')
+                : '<p class="text-stone-600">Sin eventos registrados.</p>';
+        }
+    } catch (e) {}
+}
+
+async function reiniciar() {
+    if (!(await donosoConfirm('¿Reiniciar todas las metricas del monitor? (util antes de una demo)', { textoOk: 'Reiniciar' }))) return;
+    await fetch('/api/monitor/reiniciar', { method: 'POST' });
+    Object.keys(firmas).forEach(k => delete firmas[k]);
+    cargar();
+}
+
+async function cargarUmbrales() {
+    try {
+        const d = await (await fetch('/api/monitor/umbrales', { cache: 'no-store' })).json();
+        document.getElementById('u-http').value = d.umbrales.latencia_http_ms;
+        document.getElementById('u-llm').value = d.umbrales.latencia_llm_ms;
+        document.getElementById('u-err').value = d.umbrales.tasa_error_pct;
+        document.getElementById('u-5xx').value = d.umbrales.tasa_5xx_pct;
+
+        notificarAlertas(d.alertas || []);
+
+        const cont = document.getElementById('alertas-container');
+        const lista = document.getElementById('lista-alertas');
+        if (d.alertas && d.alertas.length > 0) {
+            cont.classList.remove('hidden');
+            const firma = JSON.stringify(d.alertas);
+            if (cambio('alertas', firma)) {
+                lista.innerHTML = d.alertas.map(a => {
+                    const esCritico = a.severidad === 'critico';
+                    const color = esCritico ? 'red' : 'yellow';
+                    return `
+                    <div class="bg-${color}-950/40 border border-${color}-800 rounded-lg p-3 flex items-center gap-3 fila-nueva">
+                        <i class="fa-solid fa-bell text-${color}-400 ${esCritico ? 'pulso' : ''}"></i>
+                        <div class="flex-1">
+                            <p class="text-sm font-bold text-${color}-300">${a.titulo}</p>
+                            <p class="text-xs text-stone-400">Actual: ${a.valor_actual} | Umbral: ${a.umbral}</p>
+                        </div>
+                        <span class="text-[10px] px-2 py-0.5 rounded-full border border-${color}-700 text-${color}-400 uppercase">${a.severidad}</span>
+                    </div>`;
+                }).join('');
+            }
+        } else {
+            cont.classList.add('hidden');
+        }
+    } catch (e) {}
+}
+
+async function guardarUmbrales() {
+    const body = {
+        latencia_http_ms: parseFloat(document.getElementById('u-http').value),
+        latencia_llm_ms: parseFloat(document.getElementById('u-llm').value),
+        tasa_error_pct: parseFloat(document.getElementById('u-err').value),
+        tasa_5xx_pct: parseFloat(document.getElementById('u-5xx').value),
+    };
+    await fetch('/api/monitor/umbrales', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    cargarUmbrales();
+}
+
+// ===================================================================
+// NOTIFICACIONES DE ALERTAS (toast DonOso + notificacion del navegador)
+// ===================================================================
+const _alertasNotificadas = new Set();
+let _notifNavegador = false;
+
+function notificarAlertas(alertas) {
+    const actuales = new Set();
+    for (const a of alertas) {
+        const clave = a.clave + '|' + a.severidad;
+        actuales.add(clave);
+        if (!_alertasNotificadas.has(clave)) {
+            const tipo = a.severidad === 'critico' ? 'critico' : 'warning';
+            donosoToast(`Actual: ${a.valor_actual} · Umbral: ${a.umbral}`, tipo, a.titulo, 8000);
+            if (_notifNavegador && 'Notification' in window && Notification.permission === 'granted') {
+                new Notification('DonOso — ' + a.titulo, { body: `Actual: ${a.valor_actual} · Umbral: ${a.umbral}` });
+            }
+        }
+    }
+    // Si una alerta desaparece y luego reaparece, se vuelve a notificar.
+    for (const k of [..._alertasNotificadas]) if (!actuales.has(k)) _alertasNotificadas.delete(k);
+    for (const k of actuales) _alertasNotificadas.add(k);
+}
+
+function activarNotificaciones() {
+    if (!('Notification' in window)) { donosoToast('Tu navegador no soporta notificaciones del sistema.', 'warning'); return; }
+    Notification.requestPermission().then(p => {
+        _notifNavegador = (p === 'granted');
+        const btn = document.getElementById('btn-notif');
+        if (_notifNavegador) {
+            donosoToast('Notificaciones del navegador activadas.', 'success');
+            btn.innerHTML = '<i class="fa-solid fa-bell mr-1"></i>Activadas';
+            btn.classList.add('text-amber-400');
+        } else {
+            donosoToast('No se concedio el permiso de notificaciones.', 'warning');
+        }
+    });
+}
+
+// ===================================================================
+// PLAN DE CONTINGENCIA
+// ===================================================================
+function filaPlan(p) {
+    return `<div class="bg-stone-950 border border-stone-800 rounded-lg p-2.5 text-xs">
+        <p class="text-stone-300 font-medium"><i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1"></i>${p.alerta}</p>
+        <p class="text-stone-500 mt-0.5"><i class="fa-solid fa-arrow-right-long mr-1 text-stone-600"></i>${p.accion}</p>
+    </div>`;
+}
+function filaContingencia(c) {
+    const color = c.ok ? 'green' : 'red';
+    const icono = c.ok ? 'fa-check' : 'fa-xmark';
+    return `<div class="bg-stone-950 border border-stone-800 border-l-2 border-l-${color}-600 rounded p-2 text-xs fila-nueva">
+        <div class="flex justify-between gap-2">
+            <span class="text-stone-300 font-medium">${c.accion}</span>
+            <span class="text-stone-600 shrink-0">${c.hora}</span>
+        </div>
+        <p class="text-${color}-400 mt-1"><i class="fa-solid ${icono} mr-1"></i>${c.resultado}</p>
+    </div>`;
+}
+async function cargarContingencia() {
+    try {
+        const d = await (await fetch('/api/monitor/contingencia', { cache: 'no-store' })).json();
+        const badge = document.getElementById('modelo-actual');
+        badge.textContent = d.modelo_actual + (d.degradado ? ' (degradado)' : '');
+        badge.className = 'text-[11px] px-2 py-0.5 rounded-full border ' +
+            (d.degradado ? 'border-yellow-700 bg-yellow-950 text-yellow-400' : 'border-stone-700 bg-stone-800 text-stone-300');
+        if (cambio('plan', JSON.stringify(d.plan)))
+            document.getElementById('tabla-plan').innerHTML = d.plan.length
+                ? d.plan.map(filaPlan).join('')
+                : '<p class="text-xs text-stone-600">Sin acciones configuradas.</p>';
+        if (cambio('contingencia', JSON.stringify(d.historial)))
+            document.getElementById('lista-contingencia').innerHTML = d.historial.length
+                ? d.historial.map(filaContingencia).join('')
+                : '<p class="text-xs text-stone-600">Aun no se ejecuto ninguna remediacion.</p>';
+    } catch (e) {}
+}
+
+crearGraficos();
+cargar();
+cargarUmbrales();
+cargarContingencia();
+setInterval(cargar, 3000);
+setInterval(cargarUmbrales, 5000);
+setInterval(cargarContingencia, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# Entorno virtual de Python
+env_tesis/
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Base de datos vectorial del RAG (se reconstruye al arrancar)
+chroma_data/
+
+# Estado del servidor XMPP (PyJabber lo recrea)
+server.db
+server.db-wal
+server.db-shm
+
+# Respaldos locales (no subir)
+restaurante_backup.db
+*.backup
+
+# Materiales de trabajo (no subir)
+Claude outputs/
