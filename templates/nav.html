@@ -322,3 +322,47 @@
     };
   })();
   </script>
+
+  {% if usuario is defined and usuario %}
+  <script>
+  // ALERTAS DE SOBRECARGA en pantalla (en todos los paneles).
+  // El admin ve todas; cada trabajador solo las de su puesto, con un mensaje
+  // personal si es la persona mas cargada.
+  (function avisosSobrecarga() {
+    const ROL = {{ usuario.rol | tojson }};
+    const MI_ID = {{ (usuario.id or 0) | tojson }};
+    const CLAVE = 'donoso_alerta_ultima';
+    let ultimo = null;
+    try { const v = sessionStorage.getItem(CLAVE); if (v !== null) ultimo = parseInt(v, 10); } catch (e) {}
+    function guardar(v) { ultimo = v; try { sessionStorage.setItem(CLAVE, String(v)); } catch (e) {} }
+    function mostrar(a) {
+      if (!window.donosoToast) return;
+      const tipo = a.nivel === 'critica' ? 'critico' : 'warning';
+      if (ROL === 'admin') {
+        const extra = a.pedidos_priorizados.length
+          ? ' Se priorizaron en cocina: ' + a.pedidos_priorizados.map(i => '#' + i).join(', ') + '.' : '';
+        donosoToast(a.pct_alta + '% de carga alta en ' + a.rol_nombre + ' (' + a.lecturas + ' lecturas).' + extra + ' ' + a.sugerencia,
+                    tipo, 'Sobrecarga en ' + a.rol_nombre, 12000);
+      } else if (a.trabajador_id === MI_ID) {
+        donosoToast('Detectamos mucha carga en tu puesto. Tomate una pausa breve cuando puedas: ya se pidio apoyo y se priorizaron los pedidos atrasados.',
+                    'warning', 'Cuidate', 12000);
+      } else {
+        donosoToast('Tu equipo esta con carga alta. Ya se priorizaron los pedidos atrasados y se pidio refuerzo.',
+                    'info', 'Sobrecarga en ' + a.rol_nombre, 9000);
+      }
+    }
+    async function revisar() {
+      try {
+        const r = await fetch('/api/alertas/sobrecarga/recientes?desde=' + (ultimo === null ? -1 : ultimo), { cache: 'no-store' });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (ultimo === null) { guardar(d.ultimo_id); return; }
+        (d.alertas || []).forEach(mostrar);
+        if (d.ultimo_id !== ultimo) guardar(d.ultimo_id);
+      } catch (e) {}
+    }
+    revisar();
+    setInterval(revisar, 10000);
+  })();
+  </script>
+  {% endif %}

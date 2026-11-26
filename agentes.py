@@ -29,6 +29,16 @@ import monitor
 # Cocina. Es un set en memoria compartido entre el hilo de agentes y la API
 # (add/discard sobre un set son operaciones atomicas en CPython).
 PEDIDOS_URGENTES = set()
+# Motivo de cada urgencia: 'cliente' (estres alto en el chat) o 'sobrecarga'
+# (alerta de sobrecarga del equipo). El del cliente tiene precedencia.
+MOTIVOS_URGENCIA = {}
+
+
+def marcar_urgente(pedido_id: int, motivo: str = "cliente"):
+    """Marca un pedido para que cocina lo priorice, recordando el motivo."""
+    PEDIDOS_URGENTES.add(pedido_id)
+    if MOTIVOS_URGENCIA.get(pedido_id) != "cliente":
+        MOTIVOS_URGENCIA[pedido_id] = motivo
 
 
 # ==============================================================
@@ -96,20 +106,27 @@ class MeseroAgent(Agent):
         """El cliente mostro estres ALTO (ej: 'urgente apurate'). El
         Mesero manda una senal por XMPP al canal de Cocina para que
         apure ese pedido."""
-        def __init__(self, pedido_id, mensaje=""):
+        def __init__(self, pedido_id, mensaje="", motivo="cliente"):
             super().__init__()
             self.pedido_id = pedido_id
             self.mensaje = mensaje
+            self.motivo = motivo  # 'cliente' | 'sobrecarga'
 
         async def run(self):
             msg = Message(to="cocinero@127.0.0.1")
             msg.set_metadata("performative", "request")
             msg.set_metadata("accion", "apurar_pedido")
-            msg.body = db.to_json({"pedido_id": self.pedido_id, "mensaje": self.mensaje})
+            msg.body = db.to_json({"pedido_id": self.pedido_id, "mensaje": self.mensaje,
+                                   "motivo": self.motivo})
             await self.send(msg)
-            print(f"[Mesero] Senal de URGENCIA enviada a Cocina para el pedido #{self.pedido_id}")
-            monitor.registrar_actividad_agente("mesero", "Envio senal de URGENCIA a Cocina",
-                                                f"#{self.pedido_id}: {self.mensaje}")
+            if self.motivo == "sobrecarga":
+                print(f"[Mesero] Sobrecarga: pidio a Cocina PRIORIZAR el pedido #{self.pedido_id}")
+                monitor.registrar_actividad_agente("mesero", "Pidio a Cocina priorizar un pedido (sobrecarga)",
+                                                    f"#{self.pedido_id}: {self.mensaje}")
+            else:
+                print(f"[Mesero] Senal de URGENCIA enviada a Cocina para el pedido #{self.pedido_id}")
+                monitor.registrar_actividad_agente("mesero", "Envio senal de URGENCIA a Cocina",
+                                                    f"#{self.pedido_id}: {self.mensaje}")
 
     async def setup(self):
         print(f"[Mesero] Agente listo ({self.jid})")
@@ -213,11 +230,17 @@ class CocineroAgent(Agent):
                 return
             data = db.from_json(msg.body)
             pid = data["pedido_id"]
-            PEDIDOS_URGENTES.add(pid)
-            print(f"[Cocinero] URGENTE: el cliente pide apurar el pedido #{pid}. ({data.get('mensaje','')})")
-            monitor.registrar_actividad_agente("cocinero", "Recibio senal de URGENCIA (apurar)",
-                                                f"#{pid}: {data.get('mensaje','')}")
-            monitor.registrar_evento("warning", f"Cliente pide apurar el pedido #{pid} (estres alto)", origen="cocina")
+            motivo = data.get("motivo", "cliente")
+            marcar_urgente(pid, motivo)
+            if motivo == "sobrecarga":
+                print(f"[Cocinero] PRIORIDAD por sobrecarga del equipo: pedido #{pid}. ({data.get('mensaje','')})")
+                monitor.registrar_actividad_agente("cocinero", "Priorizo un pedido atrasado (sobrecarga)",
+                                                    f"#{pid}: {data.get('mensaje','')}")
+            else:
+                print(f"[Cocinero] URGENTE: el cliente pide apurar el pedido #{pid}. ({data.get('mensaje','')})")
+                monitor.registrar_actividad_agente("cocinero", "Recibio senal de URGENCIA (apurar)",
+                                                    f"#{pid}: {data.get('mensaje','')}")
+                monitor.registrar_evento("warning", f"Cliente pide apurar el pedido #{pid} (estres alto)", origen="cocina")
 
     async def setup(self):
         print(f"[Cocinero] Agente listo ({self.jid})")

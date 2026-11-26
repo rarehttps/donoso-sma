@@ -20,3 +20,10 @@ restaurante_backup.db
 
 # Materiales de trabajo (no subir)
 Claude outputs/
+
+# Copias de seguridad locales
+respaldos/
+
+# Clave de cifrado de la base (NUNCA subir)
+.env
+*.cifrando

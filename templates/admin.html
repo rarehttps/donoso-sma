@@ -37,6 +37,9 @@
         <button id="tab-carga" onclick="verTab('carga')" class="tab px-4 py-2 text-sm font-bold border-b-2 border-transparent text-stone-400 hover:text-stone-200">
             <i class="fa-solid fa-brain mr-1"></i>Carga mental
         </button>
+        <button id="tab-alertas" onclick="verTab('alertas')" class="tab px-4 py-2 text-sm font-bold border-b-2 border-transparent text-stone-400 hover:text-stone-200">
+            <i class="fa-solid fa-bell mr-1"></i>Alertas<span id="badge-alertas" class="hidden ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-red-600 text-white"></span>
+        </button>
     </div>
 </div>
 
@@ -376,12 +379,30 @@
             <h2 class="text-sm font-bold text-stone-300 mb-1"><i class="fa-solid fa-calendar-days mr-2 text-amber-400"></i>Comparacion de carga mental por mes</h2>
             <p class="text-xs text-stone-500 mb-4">Cada mes muestra el total de lecturas y el reparto Baja / Media / Alta (la barra suma 100%). Respeta el filtro de rol.</p>
             <div id="cm-meses" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
-            <p id="cm-mes-aviso" class="text-xs text-amber-300 mt-3 hidden"><i class="fa-solid fa-circle-info mr-1"></i>Por ahora tienes datos de un solo mes. Cuando generes la inyeccion de septiembre, aqui apareceran los dos meses lado a lado para compararlos.</p>
+            <p id="cm-mes-aviso" class="text-xs text-amber-300 mt-3 hidden"><i class="fa-solid fa-circle-info mr-1"></i>Por ahora hay datos de un solo mes. Cuando se registre otro mes, aqui apareceran lado a lado para compararlos.</p>
             <div class="bg-stone-900 border border-stone-800 rounded-xl p-5 mt-4">
                 <h3 class="text-sm font-bold text-stone-300 mb-3">% de carga alta por mes</h3>
                 <div class="relative h-56"><canvas id="cm-mes-barras"></canvas></div>
             </div>
         </div>
+    </section>
+
+    <!-- ================= ALERTAS DE SOBRECARGA ================= -->
+    <section id="sec-alertas" class="hidden">
+        <div class="flex items-start justify-between flex-wrap gap-3 mb-4">
+            <p class="text-sm text-stone-400 max-w-3xl">
+                Los agentes vigilan la carga mental de cada puesto en los ultimos <b id="al-ventana" class="text-stone-200">30</b> min.
+                Si la carga alta supera <b id="al-umbral" class="text-stone-200">35%</b> (con al menos <b id="al-min" class="text-stone-200">6</b> lecturas),
+                <b class="text-amber-300">actuan</b>: priorizan en cocina los pedidos atrasados (el agente Mesero avisa al Cocinero por XMPP),
+                sugieren refuerzo y una pausa breve para el trabajador mas cargado, y avisan en pantalla.
+            </p>
+            <button onclick="evaluarAlertas()" class="bg-amber-600 hover:bg-amber-500 px-4 py-2 rounded-lg text-sm font-bold">
+                <i class="fa-solid fa-magnifying-glass-chart mr-1"></i>Evaluar ahora
+            </button>
+        </div>
+        <div id="al-ventana-grid" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6"></div>
+        <h2 class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-clock-rotate-left mr-2 text-amber-400"></i>Bitacora de alertas</h2>
+        <div id="al-lista" class="space-y-3"></div>
     </section>
 </main>
 
@@ -391,7 +412,7 @@
     // ---------- pestanas ----------
     function verTab(t) {
         _tabActivo = t;
-        ['agentes', 'carta', 'insumos', 'usuarios', 'carga'].forEach(x => {
+        ['agentes', 'carta', 'insumos', 'usuarios', 'carga', 'alertas'].forEach(x => {
             document.getElementById('sec-' + x).classList.toggle('hidden', x !== t);
             const b = document.getElementById('tab-' + x);
             const activo = x === t;
@@ -402,6 +423,7 @@
         if (t === 'insumos') cargarInsumos();
         if (t === 'usuarios') cargarUsuarios();
         if (t === 'carga') cargarCargaMental();
+        if (t === 'alertas') cargarAlertas();
     }
 
     // Tiempo real: refresca la pestana activa. Evita pisar lo que el admin
@@ -1133,7 +1155,73 @@
         donosoToast(r.ok ? 'Contrasena actualizada.' : ('Error: ' + (r.error || '')), r.ok ? 'success' : 'error');
     }
 
+    // ---------- ALERTAS DE SOBRECARGA ----------
+    const AL_ESTADO = {
+        critica:   ['Critica',      'border-l-red-600',     'text-red-400'],
+        alta:      ['Sobrecarga',   'border-l-amber-500',   'text-amber-400'],
+        normal:    ['Normal',       'border-l-emerald-500', 'text-emerald-400'],
+        sin_datos: ['Sin lecturas', 'border-l-stone-600',   'text-stone-500'],
+    };
+    async function cargarAlertas() {
+        try {
+            const d = await (await fetch('/api/alertas/sobrecarga', { cache: 'no-store' })).json();
+            const c = d.config;
+            document.getElementById('al-ventana').textContent = c.ventana_min;
+            document.getElementById('al-umbral').textContent = c.umbral_alta + '%';
+            document.getElementById('al-min').textContent = c.min_lecturas;
+            document.getElementById('al-ventana-grid').innerHTML = d.ventana.map(v => {
+                const [txt, borde, color] = AL_ESTADO[v.estado] || AL_ESTADO.sin_datos;
+                return `<div class="bg-stone-900 border border-stone-800 border-l-4 ${borde} rounded-xl p-4">
+                    <div class="flex items-center justify-between">
+                        <p class="text-sm font-bold text-stone-200">${v.rol_nombre}</p>
+                        <span class="text-[11px] font-bold ${color}">${txt}</span>
+                    </div>
+                    <p class="text-2xl font-bold ${color} mt-1">${v.lecturas ? v.pct_alta + '%' : '—'}</p>
+                    <p class="text-[11px] text-stone-500">carga alta · ${v.lecturas} lecturas en ${c.ventana_min} min</p>
+                    <div class="relative h-1.5 bg-stone-800 rounded mt-2" title="Umbral: ${c.umbral_alta}%">
+                        <div class="h-1.5 rounded" style="width:${Math.min(100, v.pct_alta)}%;background:${CM_COLORES.alta}"></div>
+                        <div class="absolute -top-1 h-3.5 w-0.5 bg-stone-400" style="left:${c.umbral_alta}%"></div>
+                    </div>
+                </div>`;
+            }).join('');
+            const pendientes = d.alertas.filter(a => !a.atendida).length;
+            const badge = document.getElementById('badge-alertas');
+            badge.textContent = pendientes;
+            badge.classList.toggle('hidden', !pendientes);
+            document.getElementById('al-lista').innerHTML = d.alertas.length ? d.alertas.map(a => {
+                const crit = a.nivel === 'critica';
+                return `<div class="bg-stone-900 border border-stone-800 border-l-4 ${crit ? 'border-l-red-600' : 'border-l-amber-500'} rounded-xl p-4 ${a.atendida ? 'opacity-60' : ''}">
+                    <div class="flex items-start justify-between gap-3 flex-wrap">
+                        <div>
+                            <p class="font-bold text-stone-100"><i class="fa-solid ${crit ? 'fa-bell text-red-400' : 'fa-triangle-exclamation text-amber-400'} mr-1"></i>Sobrecarga${crit ? ' critica' : ''} en ${a.rol_nombre}: ${a.pct_alta}% de carga alta</p>
+                            <p class="text-[11px] text-stone-500">${a.fecha_hora} · ${a.lecturas} lecturas${a.trabajador ? ' · mas cargado: ' + a.trabajador : ''}</p>
+                        </div>
+                        ${a.atendida
+                            ? '<span class="text-[11px] text-emerald-400"><i class="fa-solid fa-check mr-1"></i>Atendida</span>'
+                            : `<button onclick="atenderAlerta(${a.id})" class="text-xs bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-1.5 rounded-lg text-stone-300"><i class="fa-solid fa-check mr-1"></i>Marcar atendida</button>`}
+                    </div>
+                    <ul class="mt-2 text-sm text-stone-300 space-y-1">${a.acciones.map(x => `<li><i class="fa-solid fa-robot text-amber-400 mr-1"></i>${x}</li>`).join('')}</ul>
+                    <p class="mt-2 text-sm text-stone-200"><i class="fa-solid fa-lightbulb text-amber-400 mr-1"></i>${a.sugerencia}</p>
+                </div>`;
+            }).join('') : '<p class="text-stone-500 text-sm">Aun no hay alertas. Se generan solas cuando un puesto acumula carga alta en el chat (por ejemplo, varios mensajes urgentes seguidos).</p>';
+        } catch (e) {}
+    }
+    async function evaluarAlertas() {
+        try {
+            const r = await (await fetch('/api/alertas/sobrecarga/evaluar', { method: 'POST' })).json();
+            const n = (r.nuevas || []).length;
+            donosoToast(n ? `Se genero ${n} alerta(s) y los agentes actuaron.` : 'Ningun puesto supera el umbral de sobrecarga en este momento.', n ? 'warning' : 'success');
+        } catch (e) { donosoToast('Error al evaluar: ' + e.message, 'error'); }
+        cargarAlertas();
+    }
+    async function atenderAlerta(id) {
+        try { await fetch('/api/alertas/sobrecarga/' + id + '/atendida', { method: 'POST' }); } catch (e) {}
+        cargarAlertas();
+    }
+
     // init
+    cargarAlertas();
+    setInterval(cargarAlertas, 8000);
     cargarAgentes();
     setInterval(cargarAgentes, 3000);
     setInterval(refrescarTabActiva, 4000);

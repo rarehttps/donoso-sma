@@ -178,10 +178,10 @@ MENU OFICIAL (son los UNICOS nombres validos; copia el nombre EXACTO tal como ap
 
 Texto del cliente: "{texto}"
 
-Responde UNICAMENTE con un arreglo JSON valido, sin texto adicional, sin explicaciones, con este formato exacto:
-[{{"plato": "Nombre exacto del menu", "cantidad": 1}}]
+Responde UNICAMENTE con un objeto JSON valido, sin texto adicional, sin explicaciones, con este formato exacto:
+{{"items": [{{"plato": "Nombre exacto del menu", "cantidad": 1}}]}}
 
-Si el cliente no pidio ningun plato que exista en el menu, responde exactamente: []"""
+Si el cliente no pidio ningun plato que exista en el menu, responde exactamente: {{"items": []}}"""
 
 
 def extraer_items_pedido(texto: str, platos_disponibles: list[str], llm) -> list[dict]:
@@ -212,6 +212,14 @@ def extraer_items_pedido(texto: str, platos_disponibles: list[str], llm) -> list
         print(f"[nlp_pedido] El LLM no devolvio JSON valido: {respuesta!r}")
         return []
 
+    # Con salida JSON estructurada (format="json" de Ollama) el modelo puede
+    # envolver la lista en un objeto: {"items": [...]} o devolver un solo item.
+    if isinstance(items_crudos, dict):
+        listas = [v for v in items_crudos.values() if isinstance(v, list)]
+        if listas:
+            items_crudos = listas[0]
+        elif "plato" in items_crudos:
+            items_crudos = [items_crudos]
     if not isinstance(items_crudos, list):
         return []
 

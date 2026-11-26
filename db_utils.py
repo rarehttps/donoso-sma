@@ -571,7 +571,7 @@ async def listar_anulados_recientes(dias: int = 3) -> list[dict]:
         cur = await db.execute(
             "SELECT id, total, fecha_hora, fecha_cancelado, motivo_anulacion "
             "FROM pedidos WHERE estado = 'cancelado' AND motivo_anulacion IS NOT NULL "
-            "AND datetime(fecha_cancelado) >= datetime('now','localtime', ?) "
+            "AND datetime(fecha_cancelado) >= datetime('now','localtime', ?) AND datetime(fecha_cancelado) <= datetime('now','localtime') "
             "ORDER BY fecha_cancelado DESC",
             (f"-{dias} days",),
         )

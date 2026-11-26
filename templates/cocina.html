@@ -27,19 +27,29 @@
             return items.map(i => `${i.cantidad}x ${i.nombre}`).join(', ');
         }
 
-        // Pedidos marcados URGENTES por estres alto del cliente (senal del Mesero).
+        // Pedidos URGENTES (senal del agente Mesero por XMPP). Motivo:
+        //  'cliente'    -> estres alto del cliente en el chat (rojo)
+        //  'sobrecarga' -> alerta de sobrecarga del equipo: priorizar atrasados (ambar)
         let URGENTES = new Set();
+        let MOTIVOS = {};
         const _urgNotificados = new Set();
+        const esSobrecarga = (p) => (MOTIVOS[p.id] || 'cliente') === 'sobrecarga';
         function badgeUrgente(p) {
-            return URGENTES.has(p.id)
-                ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white animate-pulse"><i class="fa-solid fa-triangle-exclamation mr-1"></i>URGENTE — apurar</span>'
-                : '';
+            if (!URGENTES.has(p.id)) return '';
+            return esSobrecarga(p)
+                ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-stone-950 font-bold"><i class="fa-solid fa-bolt mr-1"></i>PRIORIDAD — sobrecarga</span>'
+                : '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white animate-pulse"><i class="fa-solid fa-triangle-exclamation mr-1"></i>URGENTE — apurar</span>';
         }
+        function bordeUrgencia(p, normal) {
+            if (!URGENTES.has(p.id)) return normal;
+            return esSobrecarga(p) ? 'border-l-amber-400 ring-1 ring-amber-600/60' : 'border-l-red-600 ring-1 ring-red-700/60';
+        }
+        // Los priorizados van primero (sin perder el orden por antiguedad).
+        const priorizar = (lista) => [...lista].sort((a, b) => URGENTES.has(b.id) - URGENTES.has(a.id));
 
         function tarjetaPendiente(p) {
-            const urg = URGENTES.has(p.id);
             return `
-            <div class="bg-stone-900 p-4 rounded-lg border border-stone-800 border-l-4 ${urg ? 'border-l-red-600 ring-1 ring-red-700/60' : 'border-l-amber-500'}">
+            <div class="bg-stone-900 p-4 rounded-lg border border-stone-800 border-l-4 ${bordeUrgencia(p, 'border-l-amber-500')}">
                 <p class="font-bold">Pedido #${p.id} <span class="text-stone-500 text-sm font-normal">S/ ${p.total.toFixed(2)}</span>${badgeUrgente(p)}</p>
                 <p class="text-sm text-stone-400 mb-3">${formatearItems(p.items)}</p>
                 <div class="flex gap-2">
@@ -54,9 +64,8 @@
         }
 
         function tarjetaPreparacion(p) {
-            const urg = URGENTES.has(p.id);
             return `
-            <div class="bg-stone-900 p-4 rounded-lg border border-stone-800 border-l-4 ${urg ? 'border-l-red-600 ring-1 ring-red-700/60' : 'border-l-orange-500'}">
+            <div class="bg-stone-900 p-4 rounded-lg border border-stone-800 border-l-4 ${bordeUrgencia(p, 'border-l-orange-500')}">
                 <p class="font-bold">Pedido #${p.id} <span class="text-stone-500 text-sm font-normal">S/ ${p.total.toFixed(2)}</span>${badgeUrgente(p)}</p>
                 <p class="text-sm text-stone-400 mb-3">${formatearItems(p.items)}</p>
                 <div class="flex gap-2">
@@ -76,23 +85,28 @@
                 const data = await res.json();
 
                 URGENTES = new Set(data.urgentes || []);
+                MOTIVOS = data.motivos || {};
                 (data.urgentes || []).forEach(id => {
                     if (!_urgNotificados.has(id)) {
                         _urgNotificados.add(id);
-                        if (window.donosoToast) donosoToast(`El cliente pide APURAR el pedido #${id}.`, 'critico', 'URGENTE en cocina', 9000);
+                        if (!window.donosoToast) return;
+                        if ((MOTIVOS[id] || 'cliente') === 'sobrecarga')
+                            donosoToast(`Prioriza el pedido #${id}: el equipo esta con sobrecarga y este pedido ya va atrasado.`, 'warning', 'Prioridad en cocina', 9000);
+                        else
+                            donosoToast(`El cliente pide APURAR el pedido #${id}.`, 'critico', 'URGENTE en cocina', 9000);
                     }
                 });
                 for (const id of [..._urgNotificados]) if (!URGENTES.has(id)) _urgNotificados.delete(id);
 
                 const listaP = document.getElementById('lista-pendientes');
                 listaP.innerHTML = data.pendientes.length
-                    ? data.pendientes.map(tarjetaPendiente).join('')
+                    ? priorizar(data.pendientes).map(tarjetaPendiente).join('')
                     : '<p class="text-stone-600 text-sm">Sin pedidos pendientes.</p>';
                 document.getElementById('count-pendientes').textContent = `(${data.pendientes.length})`;
 
                 const listaE = document.getElementById('lista-preparacion');
                 listaE.innerHTML = data.en_preparacion.length
-                    ? data.en_preparacion.map(tarjetaPreparacion).join('')
+                    ? priorizar(data.en_preparacion).map(tarjetaPreparacion).join('')
                     : '<p class="text-stone-600 text-sm">Nada en preparacion.</p>';
                 document.getElementById('count-preparacion').textContent = `(${data.en_preparacion.length})`;
 

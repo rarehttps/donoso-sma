@@ -11,7 +11,7 @@
     {% set pagina = 'almacen' %}
 {% include 'nav.html' %}
 
-    <main class="p-6 max-w-4xl mx-auto space-y-6">
+    <main class="p-6 max-w-6xl mx-auto space-y-6">
         <div class="bg-stone-900 p-5 rounded-lg flex items-center justify-between">
             <div>
                 <p class="font-bold">Avisos sin revisar: <span id="avisos" class="text-amber-400">0</span></p>
@@ -21,6 +21,50 @@
                 <i class="fa-solid fa-magnifying-glass mr-2"></i>Revisar ahora
             </button>
         </div>
+
+        <!-- ================= INVENTARIO PREDICTIVO ================= -->
+        <section id="sec-prediccion">
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 class="text-lg font-bold text-amber-300"><i class="fa-solid fa-chart-line mr-2"></i>Inventario predictivo</h2>
+                <div class="flex items-center gap-2">
+                    <select id="pred-dias" onchange="cargarPrediccion()" title="Horizonte del pronostico"
+                        class="bg-stone-800 border border-stone-700 text-stone-200 text-sm rounded-lg px-3 py-1.5">
+                        <option value="7">Proximos 7 dias</option>
+                        <option value="14">Proximos 14 dias</option>
+                    </select>
+                    <button onclick="descargarCompras()" title="Descargar la lista de compras (Excel/CSV)"
+                        class="text-sm bg-stone-800 hover:bg-stone-700 border border-stone-700 text-amber-300 px-3 py-1.5 rounded-lg">
+                        <i class="fa-solid fa-download mr-1"></i>Lista de compras
+                    </button>
+                </div>
+            </div>
+            <div id="pred-kpis" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                <div class="lg:col-span-2 min-w-0 bg-stone-900 border border-stone-800 rounded-lg p-4">
+                    <p class="text-sm font-bold text-stone-300 mb-3"><i class="fa-solid fa-utensils mr-1 text-amber-400"></i>Platos estimados por dia</p>
+                    <div id="pred-barras" class="space-y-2"></div>
+                    <p id="pred-top" class="text-xs text-stone-500 mt-3"></p>
+                </div>
+                <div class="lg:col-span-3 min-w-0 bg-stone-900 border border-stone-800 rounded-lg overflow-x-auto">
+                    <p class="text-sm font-bold text-stone-300 px-4 pt-4 mb-2"><i class="fa-solid fa-cart-shopping mr-1 text-amber-400"></i>Compras sugeridas</p>
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-stone-500 border-b border-stone-800 text-xs">
+                                <th class="text-left py-2 px-3 font-medium">Insumo</th>
+                                <th class="text-right py-2 px-2 font-medium">Stock</th>
+                                <th class="text-right py-2 px-2 font-medium">Consumo/dia</th>
+                                <th class="text-right py-2 px-2 font-medium">Alcanza</th>
+                                <th class="text-right py-2 px-2 font-medium">Comprar</th>
+                                <th class="text-center py-2 px-2 font-medium">Prioridad</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pred-compras"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="pred-venc" class="mt-3 space-y-2"></div>
+            <p id="pred-metodo" class="text-[11px] text-stone-500 mt-2"></p>
+        </section>
 
         <section>
             <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -153,7 +197,7 @@
                 })).json();
                 if (r.ok) {
                     donosoToast(`Stock de ${i.nombre} actualizado a ${val} ${i.unidad_medida}.`, 'success');
-                    cargar(); cargarInventario();
+                    cargar(); cargarInventario(); cargarPrediccion();
                 } else {
                     donosoToast('No se pudo guardar: ' + (r.error || ''), 'error');
                 }
@@ -168,8 +212,95 @@
             cargarInventario();
         }
 
+        // ---- Inventario predictivo: pronostico de demanda y compras sugeridas ----
+        let _pred = null;
+        const fmtNum = (v) => (Math.round((v || 0) * 100) / 100).toLocaleString('es-PE');
+        const fechaCorta = (iso) => { const p = (iso || '').split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : ''; };
+        const PRIORIDAD = {
+            urgente: ['Urgente', 'bg-red-950 text-red-400 border-red-800'],
+            pronto: ['Pronto', 'bg-yellow-950 text-yellow-400 border-yellow-800'],
+        };
+        function kpi(titulo, valor, sub, color) {
+            return `<div class="bg-stone-900 border border-stone-800 rounded-lg p-3">
+                <p class="text-[11px] uppercase tracking-wide text-stone-500">${titulo}</p>
+                <p class="text-2xl font-bold ${color || 'text-stone-100'}">${valor}</p>
+                <p class="text-[11px] text-stone-500 truncate">${sub}</p></div>`;
+        }
+        async function cargarPrediccion() {
+            try {
+                const dias = document.getElementById('pred-dias').value;
+                const d = await (await fetch('/api/almacen/prediccion?dias=' + dias, { cache: 'no-store' })).json();
+                _pred = d;
+                const r = d.resumen;
+                document.getElementById('pred-kpis').innerHTML =
+                    kpi('Platos estimados', r.platos_estimados, `proximos ${d.horizonte_dias} dias`) +
+                    kpi('Insumos a comprar', r.insumos_a_comprar, 'segun el pronostico', r.insumos_a_comprar ? 'text-amber-400' : 'text-green-400') +
+                    kpi('Compras urgentes', r.urgentes, 'se acaban en menos de 3 dias', r.urgentes ? 'text-red-400' : 'text-green-400') +
+                    kpi('Menor cobertura', r.menor_cobertura ? r.menor_cobertura.dias + ' dias' : '—', r.menor_cobertura ? r.menor_cobertura.nombre : 'sin consumo previsto');
+
+                const max = Math.max(1, ...d.pronostico_diario.map(x => x.platos));
+                document.getElementById('pred-barras').innerHTML = d.pronostico_diario.map(x => `
+                    <div class="flex items-center gap-2 text-xs" title="${x.top.map(t => t.nombre + ': ' + t.cantidad).join(' · ')}">
+                        <span class="w-16 text-stone-400 shrink-0">${x.dia} ${fechaCorta(x.fecha)}</span>
+                        <div class="flex-grow bg-stone-800 rounded h-4 overflow-hidden">
+                            <div class="h-4 rounded bg-amber-500" style="width:${Math.round(100 * x.platos / max)}%"></div>
+                        </div>
+                        <span class="w-8 text-right font-bold text-stone-200">${x.platos}</span>
+                    </div>`).join('') || '<p class="text-stone-600 text-sm">Sin historial suficiente.</p>';
+                document.getElementById('pred-top').innerHTML = d.top_platos.length
+                    ? 'Lo mas pedido: ' + d.top_platos.map(t => `<b class="text-stone-300">${t.nombre}</b> (${t.cantidad})`).join(', ')
+                    : '';
+
+                document.getElementById('pred-compras').innerHTML = d.compras.length ? d.compras.map(c => {
+                    const [txt, cls] = PRIORIDAD[c.prioridad];
+                    const alcanza = c.cobertura_dias === null ? '—'
+                        : `${c.cobertura_dias} d <span class="text-stone-500">(${fechaCorta(c.se_agota)})</span>`;
+                    return `<tr class="border-b border-stone-800/60 hover:bg-stone-800/30">
+                        <td class="py-2 px-3 text-stone-200 font-medium">${c.nombre}</td>
+                        <td class="py-2 px-2 text-right">${fmtNum(c.stock_actual)} <span class="text-stone-500">${c.unidad}</span></td>
+                        <td class="py-2 px-2 text-right">${fmtNum(c.consumo_diario)}</td>
+                        <td class="py-2 px-2 text-right whitespace-nowrap">${alcanza}</td>
+                        <td class="py-2 px-2 text-right font-bold text-amber-300 whitespace-nowrap">${fmtNum(c.compra_sugerida)} ${c.unidad}</td>
+                        <td class="py-2 px-2 text-center"><span class="text-[10px] px-2 py-0.5 rounded-full border ${cls}">${txt}</span></td>
+                    </tr>`;
+                }).join('') : `<tr><td colspan="6" class="py-4 text-center text-green-400">El stock alcanza para los proximos ${d.horizonte_dias} dias.</td></tr>`;
+
+                let html = '';
+                if (d.riesgo_merma.length) {
+                    html += `<div class="bg-stone-900 border border-stone-800 border-l-4 border-l-yellow-500 rounded-lg p-3 text-sm">
+                        <b class="text-yellow-400"><i class="fa-solid fa-recycle mr-1"></i>Riesgo de merma:</b> ` +
+                        d.riesgo_merma.map(m => `${m.nombre} (vence en ${m.dias} d, sobrarian ~${fmtNum(m.merma_estimada)} ${m.unidad})`).join('; ') + '</div>';
+                }
+                if (d.vencidos.length) {
+                    html += `<details class="bg-stone-900 border border-stone-800 border-l-4 border-l-red-500 rounded-lg p-3 text-sm">
+                        <summary class="cursor-pointer text-red-400 font-bold"><i class="fa-solid fa-calendar-xmark mr-1"></i>${d.vencidos.length} insumo(s) con fecha de vencimiento pasada: revisa y actualiza la fecha o dalos de baja</summary>
+                        <div class="mt-2 text-stone-400 space-y-1">` +
+                        d.vencidos.map(v => `<div>${v.nombre}: vencio el ${v.fecha_vencimiento} · si se da de baja, comprar ${fmtNum(v.compra_si_baja)} ${v.unidad}</div>`).join('') +
+                        '</div></details>';
+                }
+                document.getElementById('pred-venc').innerHTML = html;
+                document.getElementById('pred-metodo').innerHTML = `<i class="fa-solid fa-circle-info mr-1"></i>${d.metodo} Actualizado: ${d.generado}.`;
+            } catch (e) {
+                document.getElementById('pred-kpis').innerHTML = '<p class="text-stone-600 text-sm col-span-full">No se pudo calcular el pronostico.</p>';
+            }
+        }
+        function descargarCompras() {
+            if (!_pred) return;
+            const filas = [['Insumo', 'Unidad', 'Stock actual', 'Consumo diario', 'Dias de cobertura', 'Se agota', 'Comprar', 'Prioridad']]
+                .concat(_pred.compras.map(c => [c.nombre, c.unidad, c.stock_actual, c.consumo_diario,
+                    c.cobertura_dias ?? '', c.se_agota ?? '', c.compra_sugerida, c.prioridad]));
+            const csv = '\ufeff' + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            a.download = `compras_sugeridas_${_pred.generado.slice(0, 10)}.csv`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+
         cargar();
         cargarInventario();
+        cargarPrediccion();
+        setInterval(cargarPrediccion, 60000);
         setInterval(cargar, 2500);
         setInterval(cargarInventarioSeguro, 3000);
     </script>

@@ -18,6 +18,8 @@ Uso:
         http://localhost:8000/almacen  (Almacen)
         http://localhost:8000/caja     (Caja)
 """
+# Proteccion de datos: cifrado en reposo de restaurante.db (debe importarse primero)
+import proteccion_datos
 import os
 import asyncio
 import uvicorn
@@ -36,6 +38,9 @@ import menu_rag
 import export_excel
 import import_docs
 import auth
+import alertas_sobrecarga
+import inventario_predictivo
+import voz
 from fastapi.responses import RedirectResponse, JSONResponse
 from nlp_pedido import detectar_intencion, extraer_items_pedido
 from deteccion_estres import analizar_mensaje
@@ -52,11 +57,13 @@ async def lifespan(app: FastAPI):
     import aplicar_migracion_v5
     import aplicar_migracion_v6
     import aplicar_migracion_v7
+    import aplicar_migracion_v8
     aplicar_migracion_v3.main()
     aplicar_migracion_v4.main()
     aplicar_migracion_v5.main()
     aplicar_migracion_v6.main()
     aplicar_migracion_v7.main()
+    aplicar_migracion_v8.main()
     await db.sembrar_credenciales_demo()
     await db.sembrar_usuarios_demo()
 
@@ -74,8 +81,26 @@ async def lifespan(app: FastAPI):
 
     await asyncio.to_thread(agent_runtime.iniciar)
 
+    # LLM: se carga en RAM en segundo plano para que el primer pedido sea rapido.
+    asyncio.create_task(asyncio.to_thread(precalentar_llm))
+    # Historial de almacen: copia unica a la coleccion con nomic-embed-text.
+    async def _migrar_historial():
+        try:
+            n = await asyncio.to_thread(chroma_db.migrar_historial_anterior)
+            if n:
+                print(f"[chroma_db] Historial de almacen migrado a nomic-embed-text: {n} eventos.")
+        except Exception as e:
+            print(f"[chroma_db] Aviso: no se pudo migrar el historial (se reintenta al proximo arranque): {e}")
+    asyncio.create_task(_migrar_historial())
+
+    # Pedidos por voz: carga Whisper local en segundo plano (no frena el arranque).
+    voz.precargar()
+    # Alertas de sobrecarga: vigilancia periodica de la carga mental por rol.
+    tarea_alertas = asyncio.create_task(alertas_sobrecarga.bucle())
+
     yield
 
+    tarea_alertas.cancel()
     agent_runtime.detener()
 
 
@@ -139,13 +164,89 @@ ruta_static = os.path.join(ruta_base, "static")
 os.makedirs(ruta_static, exist_ok=True)
 app.mount("/static", StaticFiles(directory=ruta_static), name="static")
 
-MODELO_PRINCIPAL = "llama3"
-MODELO_LIVIANO = "llama3.2:3b"   # modelo de respaldo para la degradacion elegante
+# MOTOR LLM (optimizado para latencia)
+#  - Modelo principal: Llama 3.2 3B (aprox. 2-3 veces mas rapido que Llama 3 8B
+#    en CPU y suficiente para extraer pedidos y redactar respuestas cortas).
+#    Se puede cambiar con OLLAMA_MODELO en .env (ej: OLLAMA_MODELO=llama3).
+#  - Si el principal no esta descargado, se usa llama3 y se avisa en consola.
+#  - Respuestas acotadas (num_predict): el mesero responde corto, asi que no se
+#    deja al modelo generar parrafos largos que solo suman segundos.
+#  - Extraccion de pedidos con salida JSON estructurada y temperatura 0.
+#  - keep_alive 1h + precalentamiento al arrancar: el modelo queda en RAM.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
+MODELO_PRINCIPAL = (os.environ.get("OLLAMA_MODELO") or "llama3.2:3b").strip()
+MODELO_RESPALDO = "llama3"        # el modelo original del proyecto
+MODELO_LIVIANO = (os.environ.get("OLLAMA_MODELO_LIVIANO") or "llama3.2:1b").strip()  # degradacion elegante
+MAX_TOKENS_RESPUESTA = 220        # ~150 palabras: de sobra para el chat del mesero
+MAX_TOKENS_EXTRACCION = 160       # el JSON de un pedido es corto
 
-llm_global = OllamaLLM(model=MODELO_PRINCIPAL, keep_alive="1h")
-# Para mas velocidad, descarga el modelo liviano con: ollama pull llama3.2:3b
-# El plan de contingencia degrada automaticamente a ese modelo si la latencia
-# LLM se vuelve critica de forma sostenida (ver acciones registradas abajo).
+
+def _modelos_descargados() -> list[str] | None:
+    """Modelos presentes en Ollama, o None si Ollama no responde."""
+    try:
+        import ollama
+        resp = ollama.list()
+        modelos = getattr(resp, "models", None)
+        if modelos is None:
+            modelos = resp.get("models", [])
+        return [str(getattr(m, "model", None) or m.get("model") or m.get("name") or "") for m in modelos]
+    except Exception:
+        return None
+
+
+def _esta_descargado(modelo: str, descargados: list[str]) -> bool:
+    return any(d == modelo or d == f"{modelo}:latest" for d in descargados)
+
+
+def _crear_llm(modelo: str, **opciones) -> OllamaLLM:
+    return OllamaLLM(model=modelo, keep_alive="1h", **opciones)
+
+
+def _crear_llm_chat(modelo: str) -> OllamaLLM:
+    return _crear_llm(modelo, temperature=0.3, num_predict=MAX_TOKENS_RESPUESTA)
+
+
+def _elegir_modelo_inicial() -> str:
+    descargados = _modelos_descargados()
+    if descargados is None or _esta_descargado(MODELO_PRINCIPAL, descargados):
+        return MODELO_PRINCIPAL
+    if _esta_descargado(MODELO_RESPALDO, descargados):
+        print(f"[LLM] '{MODELO_PRINCIPAL}' no esta descargado; se usa '{MODELO_RESPALDO}' (mas lento). "
+              f"Para acelerar las respuestas ejecuta: ollama pull {MODELO_PRINCIPAL}")
+        return MODELO_RESPALDO
+    print(f"[LLM] Aviso: '{MODELO_PRINCIPAL}' no esta descargado. Ejecuta: ollama pull {MODELO_PRINCIPAL}")
+    return MODELO_PRINCIPAL
+
+
+llm_global = _crear_llm_chat(_elegir_modelo_inicial())
+_llm_extraccion_cache = {}
+
+
+def llm_extraccion() -> OllamaLLM:
+    """LLM para extraer pedidos: mismo modelo que el chat (no se carga otro en
+    RAM), con salida JSON estructurada, temperatura 0 y respuesta corta."""
+    modelo = modelo_actual()
+    if modelo not in _llm_extraccion_cache:
+        _llm_extraccion_cache.clear()
+        _llm_extraccion_cache[modelo] = _crear_llm(
+            modelo, format="json", temperature=0, num_predict=MAX_TOKENS_EXTRACCION)
+    return _llm_extraccion_cache[modelo]
+
+
+def precalentar_llm():
+    """Carga el modelo en RAM al arrancar (en segundo plano) para que el primer
+    pedido no pague los segundos de carga."""
+    import time as _t
+    t0 = _t.perf_counter()
+    try:
+        _crear_llm(modelo_actual(), num_predict=1).invoke("Hola")
+        print(f"[LLM] Modelo '{modelo_actual()}' cargado y listo en {_t.perf_counter() - t0:.1f}s.")
+    except Exception as e:
+        print(f"[LLM] Aviso: no se pudo precalentar '{modelo_actual()}' (¿Ollama esta abierto?): {e}")
 
 
 def modelo_actual() -> str:
@@ -167,7 +268,7 @@ def _reiniciar_motor_llm() -> str:
     latencia causada por la descarga del modelo de la RAM entre peticiones."""
     global llm_global
     modelo = modelo_actual()
-    llm_global = OllamaLLM(model=modelo, keep_alive="1h")
+    llm_global = _crear_llm_chat(modelo)
     return f"Motor LLM reinstanciado (modelo {modelo}, keep_alive renovado a 1h)"
 
 
@@ -177,7 +278,7 @@ def _degradar_motor_llm() -> str:
     global llm_global
     actual = modelo_actual()
     if actual == MODELO_LIVIANO:
-        llm_global = OllamaLLM(model=MODELO_LIVIANO, keep_alive="1h")
+        llm_global = _crear_llm_chat(MODELO_LIVIANO)
         return f"Ya operando en modelo liviano {MODELO_LIVIANO}; keep_alive renovado"
     try:
         import ollama
@@ -187,7 +288,7 @@ def _degradar_motor_llm() -> str:
                     f"(ejecuta 'ollama pull {MODELO_LIVIANO}'). Se mantiene {actual}.")
     except Exception:
         pass  # si no podemos verificar, intentamos igual
-    llm_global = OllamaLLM(model=MODELO_LIVIANO, keep_alive="1h")
+    llm_global = _crear_llm_chat(MODELO_LIVIANO)
     return f"Degradacion elegante: motor cambiado de {actual} a {MODELO_LIVIANO} para reducir latencia"
 
 
@@ -284,6 +385,9 @@ async def procesar_mensaje(pregunta: str, llm, usuario_id: int | None = None) ->
             pregunta, analisis["puntaje"], analisis["nivel"], analisis["palabras_detectadas"],
             usuario_id=usuario_id,
         )
+        # ALERTAS DE SOBRECARGA: con cada nueva lectura se revisa si el equipo
+        # esta sobrecargado (no bloquea la respuesta del chat).
+        alertas_sobrecarga.evaluar_en_segundo_plano()
         # SENAL DE URGENCIA: si el estres es ALTO y hay un pedido en curso, el
         # Mesero avisa al canal de Cocina para que apure ese pedido.
         if analisis["nivel"] == "alto" and pedido_actual_id is not None:
@@ -434,7 +538,7 @@ async def procesar_mensaje(pregunta: str, llm, usuario_id: int | None = None) ->
         # tomados de la BD via receta_insumo). Asi contesta consultas de
         # alergenos sin inventar.
         try:
-            platos_rag = menu_rag.buscar_platos(pregunta, n_resultados=4)
+            platos_rag = await asyncio.to_thread(menu_rag.buscar_platos, pregunta, 4)
         except Exception as e:
             print(f"[Mesero] Aviso: no se pudo consultar el menu vectorial (Chroma/Ollama): {e}")
             platos_rag = []
@@ -461,7 +565,7 @@ Instrucciones:
 - Si la informacion no alcanza para estar seguro, dilo con honestidad y sugiere confirmar con el personal. NO inventes ingredientes ni platos.
 """
         try:
-            respuesta_ia = invocar_llm(llm, prompt_ing).strip()
+            respuesta_ia = (await asyncio.to_thread(invocar_llm, llm, prompt_ing)).strip()
         except Exception as e:
             print(f"[Mesero] Error al invocar Ollama: {e}")
             respuesta_ia = "Disculpa, no puedo consultar los ingredientes en este momento. Por favor pregunta al personal."
@@ -472,7 +576,7 @@ Instrucciones:
         bajos = await db.insumos_bajo_stock()
         por_vencer = await db.insumos_por_vencer(dias=5)
         try:
-            eventos = chroma_db.buscar_eventos_similares(pregunta, n_resultados=3)
+            eventos = await asyncio.to_thread(chroma_db.buscar_eventos_similares, pregunta, 3)
         except Exception as e:
             print(f"[Mesero] Aviso: no se pudo consultar el historial (ChromaDB/Ollama): {e}")
             eventos = []
@@ -501,7 +605,7 @@ Pregunta del trabajador: {pregunta}
 Responde corto, claro y en espanol, usando SOLO la informacion de arriba. No inventes cifras que no esten en los datos.
 """
         try:
-            respuesta_ia = invocar_llm(llm, prompt_stock).strip()
+            respuesta_ia = (await asyncio.to_thread(invocar_llm, llm, prompt_stock)).strip()
         except Exception as e:
             print(f"[Mesero] Error al invocar Ollama: {e}")
             respuesta_ia = "Disculpa, tengo problemas tecnicos para consultar el inventario en este momento."
@@ -514,7 +618,7 @@ Responde corto, claro y en espanol, usando SOLO la informacion de arriba. No inv
         # datos reales de la BD, sin texto generado — mas rapido y sin
         # riesgo de alucinacion.
         platos_disponibles = await db.obtener_platos_disponibles()
-        items = extraer_items_pedido(pregunta, platos_disponibles, llm)
+        items = await asyncio.to_thread(extraer_items_pedido, pregunta, platos_disponibles, llm_extraccion())
 
         if not items:
             respuesta_ia = (
@@ -609,7 +713,7 @@ Instrucciones:
 - Si el cliente pregunta por platos o precios, sugierele escribir 'carta' para ver el menu completo. No inventes precios ni platos.
 """
     try:
-        respuesta_ia = invocar_llm(llm, prompt_charla).strip()
+        respuesta_ia = (await asyncio.to_thread(invocar_llm, llm, prompt_charla)).strip()
     except Exception as e:
         print(f"[Mesero] Error al invocar Ollama: {e}")
         respuesta_ia = "Disculpa, tengo problemas tecnicos para responder en este momento."
@@ -741,6 +845,12 @@ async def api_mi_password(request: Request):
 # ==================================================================
 # API: MESERO
 # ==================================================================
+# Los mensajes del chat se atienden de a uno (igual que antes, el estado del
+# pedido en curso es compartido), pero ahora el LLM corre en un hilo: mientras
+# piensa, Cocina, Caja, Almacen y Admin siguen respondiendo sin congelarse.
+_turno_chat = asyncio.Lock()
+
+
 @app.get("/chat")
 async def chat(request: Request, pregunta: str, usuario_id: int | None = None):
     # Atribuye el pedido al trabajador que inicio sesion (para las metricas
@@ -748,13 +858,56 @@ async def chat(request: Request, pregunta: str, usuario_id: int | None = None):
     # que venga por query (compatibilidad) o None.
     sesion = _usuario_actual(request)
     uid = sesion["id"] if sesion else usuario_id
-    respuesta = await procesar_mensaje(pregunta, llm_global, usuario_id=uid)
+    async with _turno_chat:
+        respuesta = await procesar_mensaje(pregunta, llm_global, usuario_id=uid)
     return {"respuesta": respuesta}
 
 
 @app.get("/api/mesero/historial")
 async def api_mesero_historial():
     return {"historial": historial_conversacion}
+
+
+# ==================================================================
+# API: PEDIDOS POR VOZ (Whisper local)
+# ==================================================================
+@app.get("/api/voz/estado")
+async def api_voz_estado():
+    return voz.estado()
+
+
+@app.post("/api/voz/transcribir")
+async def api_voz_transcribir(request: Request):
+    """Recibe el audio grabado en el panel Mesero (base64) y lo transcribe
+    localmente. Se le da la carta como contexto para reconocer los platos."""
+    if not voz.DISPONIBLE:
+        return JSONResponse(status_code=503, content={
+            "ok": False, "error": "Pedidos por voz no activados. Instala: pip install faster-whisper"})
+    import base64
+    body = await request.json()
+    audio_b64 = (body.get("audio") or "").split(",")[-1]
+    try:
+        audio = base64.b64decode(audio_b64)
+    except Exception:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Audio invalido."})
+    try:
+        platos = await db.obtener_platos_disponibles()
+        nombres = ", ".join(str(p) for p in platos)
+        contexto = f"Pedido en la hamburgueseria DonOso. Carta: {nombres}." if nombres else ""
+    except Exception:
+        contexto = ""
+    try:
+        resultado = await asyncio.to_thread(voz.transcribir, audio, contexto)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(e)})
+    except Exception as e:
+        monitor.registrar_evento("error", f"Fallo la transcripcion de voz: {e}", origen="voz")
+        return JSONResponse(status_code=500, content={"ok": False, "error": f"No se pudo transcribir: {e}"})
+    if resultado["texto"]:
+        monitor.registrar_actividad_agente(
+            "mesero", "Recibio un pedido por voz (Whisper local)",
+            f"\"{resultado['texto']}\" ({resultado['segundos_audio']} s de audio, {resultado['ms']} ms)")
+    return {"ok": True, **resultado}
 
 
 # ==================================================================
@@ -790,8 +943,10 @@ async def api_menu_buscar(q: str):
 async def api_cocina_pedidos():
     pendientes = await db.listar_pedidos_por_estado(["pendiente"])
     en_preparacion = await db.listar_pedidos_por_estado(["en_preparacion"])
+    urgentes = sorted(agentes.PEDIDOS_URGENTES)
     return {"pendientes": pendientes, "en_preparacion": en_preparacion,
-            "urgentes": sorted(agentes.PEDIDOS_URGENTES)}
+            "urgentes": urgentes,
+            "motivos": {str(i): agentes.MOTIVOS_URGENCIA.get(i, "cliente") for i in urgentes}}
 
 
 @app.post("/api/cocina/iniciar/{pedido_id}")
@@ -866,6 +1021,13 @@ async def api_almacen_inventario():
     """Inventario COMPLETO: todos los insumos con su cantidad actual, minimo,
     unidad y vencimiento. Es lo que faltaba mostrar en el panel."""
     return {"insumos": await db.obtener_todos_insumos()}
+
+
+@app.get("/api/almacen/prediccion")
+async def api_almacen_prediccion(dias: int = 7):
+    """Inventario predictivo: pronostico de demanda, cobertura de cada insumo,
+    lista de compras sugerida y alertas de vencimiento."""
+    return await inventario_predictivo.pronosticar(dias)
 
 
 @app.post("/api/almacen/stock")
@@ -1009,7 +1171,7 @@ async def api_monitor_contingencia():
         "historial": monitor.historial_contingencia(),
         "modelo_actual": modelo_actual(),
         "modelo_principal": MODELO_PRINCIPAL,
-        "degradado": modelo_actual() != MODELO_PRINCIPAL,
+        "degradado": modelo_actual() == MODELO_LIVIANO and MODELO_LIVIANO != MODELO_PRINCIPAL,
     }
 
 
@@ -1483,7 +1645,7 @@ async def _importar_desde_texto(texto: str) -> dict:
         f"TEXTO:\n{texto[:6000]}"
     )
     try:
-        salida = await asyncio.to_thread(invocar_llm, llm_global, prompt)
+        salida = await asyncio.to_thread(invocar_llm, _crear_llm(modelo_actual(), temperature=0), prompt)
     except Exception as e:
         return {"ok": False, "error": f"El LLM (Ollama) no respondio: {e}"}
     import json, re
@@ -1613,6 +1775,49 @@ async def api_admin_insumos_eliminar(insumo_id: int, request: Request):
     if err:
         return err
     return await db.eliminar_insumo(insumo_id)
+
+
+# ==================================================================
+# API: ALERTAS DE SOBRECARGA (los agentes actuan ante la carga alta)
+# ==================================================================
+@app.get("/api/alertas/sobrecarga")
+async def api_alertas_sobrecarga(request: Request):
+    """Panel del admin: estado de la ventana por rol + bitacora de alertas."""
+    usuario, err = _admin_o_403(request)
+    if err:
+        return err
+    return {"config": alertas_sobrecarga.config(),
+            "ventana": await alertas_sobrecarga.estado_ventana(),
+            "alertas": await alertas_sobrecarga.listar(limite=40)}
+
+
+@app.get("/api/alertas/sobrecarga/recientes")
+async def api_alertas_recientes(request: Request, desde: int = -1):
+    """Avisos en pantalla: el admin ve todas; cada trabajador, las de su rol."""
+    usuario = _usuario_actual(request)
+    ultimo = await alertas_sobrecarga.ultimo_id()
+    if desde < 0 or not usuario:
+        return {"ultimo_id": ultimo, "alertas": []}
+    rol = None if usuario["rol"] == "admin" else usuario["rol"]
+    nuevas = await alertas_sobrecarga.listar(limite=10, desde_id=desde, rol=rol)
+    return {"ultimo_id": ultimo, "alertas": list(reversed(nuevas))}
+
+
+@app.post("/api/alertas/sobrecarga/evaluar")
+async def api_alertas_evaluar(request: Request):
+    usuario, err = _admin_o_403(request)
+    if err:
+        return err
+    nuevas = await alertas_sobrecarga.evaluar()
+    return {"ok": True, "nuevas": nuevas}
+
+
+@app.post("/api/alertas/sobrecarga/{alerta_id}/atendida")
+async def api_alertas_atendida(alerta_id: int, request: Request):
+    usuario, err = _admin_o_403(request)
+    if err:
+        return err
+    return {"ok": await alertas_sobrecarga.marcar_atendida(alerta_id)}
 
 
 if __name__ == "__main__":

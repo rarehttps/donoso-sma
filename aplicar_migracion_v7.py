@@ -18,6 +18,8 @@ Uso (con el servidor DETENIDO):
 """
 import sqlite3
 
+import proteccion_datos
+
 DB_PATH = "restaurante.db"
 
 
@@ -27,7 +29,7 @@ def _ya_migrada(con):
 
 
 def main():
-    con = sqlite3.connect(DB_PATH)
+    con = proteccion_datos.conectar(DB_PATH)
     cur = con.cursor()
 
     if _ya_migrada(con):

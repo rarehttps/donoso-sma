@@ -13,13 +13,15 @@ Uso:
 """
 import sqlite3
 
+import proteccion_datos
+
 DB_PATH = "restaurante.db"
 
 COLUMNAS = [("username", "TEXT"), ("password_hash", "TEXT")]
 
 
 def main():
-    con = sqlite3.connect(DB_PATH)
+    con = proteccion_datos.conectar(DB_PATH)
     cur = con.cursor()
     cur.execute("PRAGMA table_info(usuarios)")
     existentes = {row[1] for row in cur.fetchall()}

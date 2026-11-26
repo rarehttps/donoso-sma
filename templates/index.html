@@ -20,17 +20,23 @@
 
     <footer class="p-6 bg-stone-900">
         <div class="max-w-4xl mx-auto flex gap-4">
-            <input type="text" id="user-input" class="flex-grow bg-stone-800 border-none rounded-lg p-4 focus:ring-2 focus:ring-amber-500 outline-none" placeholder="Escribe tu pedido o consulta aquí..." onkeydown="if(event.key==='Enter') sendMessage()">
+            <input type="text" id="user-input" class="flex-grow min-w-0 bg-stone-800 border-none rounded-lg p-4 focus:ring-2 focus:ring-amber-500 outline-none" placeholder="Escribe o dicta tu pedido..." onkeydown="if(event.key==='Enter') sendMessage()">
+            <button id="mic-btn" onclick="toggleVoz()" title="Dictar pedido por voz"
+                class="px-5 py-4 rounded-lg font-bold transition-all border bg-stone-800 hover:bg-stone-700 border-stone-700 text-amber-400 disabled:opacity-50 disabled:cursor-not-allowed">
+                <i id="mic-icono" class="fa-solid fa-microphone"></i>
+            </button>
             <button id="send-btn" onclick="sendMessage()" class="bg-amber-600 hover:bg-amber-500 px-8 py-4 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                 <i class="fa-solid fa-paper-plane"></i>
             </button>
         </div>
+        <p id="voz-estado" class="max-w-4xl mx-auto mt-2 text-xs text-stone-400 hidden"></p>
     </footer>
 
     <script>
-        function burbujaUsuario(texto) {
+        function burbujaUsuario(texto, porVoz = false) {
+            const icono = porVoz ? ' <i class="fa-solid fa-microphone text-xs opacity-70" title="Dictado por voz"></i>' : '';
             return `<div class="bg-stone-800 p-4 rounded-lg max-w-2xl ml-auto text-right border-r-4 border-orange-500">
-                <p class="text-orange-400 font-bold">Tú:</p><p>${texto}</p></div>`;
+                <p class="text-orange-400 font-bold">Tú:${icono}</p><p>${texto}</p></div>`;
         }
 
         function burbujaAgente(texto) {
@@ -70,7 +76,8 @@
             if (!input.value.trim()) return;
 
             const userMsg = input.value;
-            chatBox.innerHTML += burbujaUsuario(userMsg);
+            chatBox.innerHTML += burbujaUsuario(userMsg, _voz.porVoz);
+            _voz.porVoz = false;
             input.value = '';
             input.disabled = true;
             btn.disabled = true;
@@ -93,7 +100,180 @@
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
+        // ---------- PEDIDOS POR VOZ (Whisper local, el audio no sale de la PC) ----------
+        // Para que reaccione rapido: la grabacion se CORTA SOLA cuando el mesero
+        // deja de hablar (~1 s de silencio), sin tener que tocar el boton otra vez.
+        const VOZ_MAX_SEG = 20;
+        const VOZ_SILENCIO_MS = 1000;     // silencio tras hablar que da por terminado el pedido
+        const VOZ_SIN_HABLA_MS = 6000;    // si no se dice nada en este tiempo, se cancela
+        const _voz = { disponible: false, cargado: false, grabando: false, rec: null, partes: [], stream: null,
+                       timer: null, porVoz: false, ctx: null, vad: null, t0: 0, cancelada: false };
+
+        function vozEstado(texto) {
+            const el = document.getElementById('voz-estado');
+            el.textContent = texto || '';
+            el.classList.toggle('hidden', !texto);
+        }
+
+        function pintarMic(grabando) {
+            const btn = document.getElementById('mic-btn');
+            btn.className = 'px-5 py-4 rounded-lg font-bold transition-all border disabled:opacity-50 disabled:cursor-not-allowed ' +
+                (grabando ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-stone-800 hover:bg-stone-700 border-stone-700 text-amber-400');
+            document.getElementById('mic-icono').className = grabando ? 'fa-solid fa-stop'
+                : (_voz.disponible ? 'fa-solid fa-microphone' : 'fa-solid fa-microphone-slash');
+        }
+
+        async function initVoz() {
+            try {
+                const d = await (await fetch('/api/voz/estado', { cache: 'no-store' })).json();
+                _voz.disponible = !!d.disponible;
+                _voz.cargado = !!d.cargado;
+                document.getElementById('mic-btn').title = d.disponible
+                    ? 'Dictar pedido por voz (se detiene solo cuando dejas de hablar)'
+                    : 'Pedidos por voz no activados: pip install faster-whisper';
+                // Mientras el modelo se carga al arrancar, se avisa y se vuelve a consultar
+                if (d.disponible && !d.cargado && !d.error) {
+                    if (!_voz.grabando) vozEstado('Preparando el reconocimiento de voz...');
+                    setTimeout(initVoz, 3000);
+                } else if (!_voz.grabando && document.getElementById('voz-estado').textContent.startsWith('Preparando')) {
+                    vozEstado('');
+                }
+            } catch (e) {}
+            if (!_voz.grabando) pintarMic(false);
+        }
+
+        // Detector de voz en el navegador: mide el volumen cada 50 ms, calibra el
+        // ruido del ambiente al inicio y corta la grabacion al detectar silencio.
+        function iniciarDetectorSilencio(stream) {
+            try {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return;
+                _voz.ctx = new AC();
+                const fuente = _voz.ctx.createMediaStreamSource(stream);
+                const an = _voz.ctx.createAnalyser();
+                an.fftSize = 1024;
+                fuente.connect(an);
+                const buf = new Float32Array(an.fftSize);
+                let ruido = 0, muestras = 0, hablo = false, ultimoSonido = performance.now();
+                _voz.vad = setInterval(() => {
+                    an.getFloatTimeDomainData(buf);
+                    let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+                    const rms = Math.sqrt(s / buf.length);
+                    const ahora = performance.now();
+                    if (ahora - _voz.t0 < 250) { ruido += rms; muestras++; return; }   // calibracion
+                    const umbral = Math.max(0.015, (muestras ? ruido / muestras : 0) * 2.5);
+                    if (rms > umbral) {
+                        if (!hablo) vozEstado('Escuchando... (se detiene solo al terminar de hablar)');
+                        hablo = true; ultimoSonido = ahora;
+                    } else if (hablo && ahora - ultimoSonido > VOZ_SILENCIO_MS) {
+                        detenerGrabacion();
+                    } else if (!hablo && ahora - _voz.t0 > VOZ_SIN_HABLA_MS) {
+                        _voz.cancelada = true;
+                        detenerGrabacion();
+                        donosoToast('No te escuche. Toca el microfono y dicta el pedido.', 'warning');
+                    }
+                }, 50);
+            } catch (e) { /* sin detector: se detiene tocando el boton o al limite de tiempo */ }
+        }
+
+        function cerrarDetector() {
+            clearInterval(_voz.vad); _voz.vad = null;
+            if (_voz.ctx) { _voz.ctx.close().catch(() => {}); _voz.ctx = null; }
+        }
+
+        async function toggleVoz() {
+            if (_voz.grabando) { detenerGrabacion(); return; }
+            if (!_voz.disponible) {
+                donosoToast('Para dictar pedidos activa el reconocimiento de voz local: pip install faster-whisper (dentro de env_tesis) y reinicia el sistema.', 'info', 'Voz no activada', 9000);
+                return;
+            }
+            if (!window.isSecureContext || !navigator.mediaDevices || !window.MediaRecorder) {
+                donosoToast('El microfono solo funciona abriendo el sistema en localhost o por https (por ejemplo, el enlace de Cloudflare).', 'warning', 'Microfono no disponible', 9000);
+                return;
+            }
+            try {
+                _voz.stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+            } catch (e) {
+                donosoToast('No se pudo usar el microfono: ' + (e.message || 'permiso denegado') + '.', 'error');
+                return;
+            }
+            const tipo = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+                .find(t => MediaRecorder.isTypeSupported(t)) || '';
+            const opciones = { audioBitsPerSecond: 32000 };      // voz: archivo liviano, sube rapido
+            if (tipo) opciones.mimeType = tipo;
+            _voz.rec = new MediaRecorder(_voz.stream, opciones);
+            _voz.partes = [];
+            _voz.cancelada = false;
+            _voz.rec.ondataavailable = e => { if (e.data && e.data.size) _voz.partes.push(e.data); };
+            _voz.rec.onstop = enviarAudio;
+            _voz.rec.start();
+            _voz.grabando = true;
+            _voz.t0 = performance.now();
+            pintarMic(true);
+            iniciarDetectorSilencio(_voz.stream);
+            let seg = 0;
+            vozEstado('Te escucho, dicta el pedido...');
+            _voz.timer = setInterval(() => { if (++seg >= VOZ_MAX_SEG) detenerGrabacion(); }, 1000);
+        }
+
+        function detenerGrabacion() {
+            if (!_voz.grabando) return;
+            clearInterval(_voz.timer);
+            cerrarDetector();
+            _voz.grabando = false;
+            if (_voz.rec && _voz.rec.state !== 'inactive') _voz.rec.stop();
+            if (_voz.stream) _voz.stream.getTracks().forEach(t => t.stop());
+            pintarMic(false);
+        }
+
+        async function enviarAudio() {
+            if (_voz.cancelada) { vozEstado(''); return; }
+            const blob = new Blob(_voz.partes, { type: (_voz.rec && _voz.rec.mimeType) || 'audio/webm' });
+            if (blob.size < 1500) { vozEstado(''); donosoToast('No se escucho nada. Intenta de nuevo.', 'warning'); return; }
+            const btn = document.getElementById('mic-btn');
+            btn.disabled = true;
+            const t0 = performance.now();
+            vozEstado(_voz.cargado ? 'Entendiendo...' : 'Entendiendo... (la primera vez tarda un poco mas mientras se prepara el modelo)');
+            try {
+                const audio = await new Promise((ok, mal) => {
+                    const fr = new FileReader();
+                    fr.onload = () => ok(fr.result); fr.onerror = mal; fr.readAsDataURL(blob);
+                });
+                const r = await fetch('/api/voz/transcribir', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audio })
+                });
+                const d = await r.json();
+                if (!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status));
+                _voz.cargado = true;
+                if (!d.texto) {
+                    vozEstado('');
+                    donosoToast('No se entendio el audio. Intenta de nuevo, mas cerca del microfono.', 'warning');
+                    return;
+                }
+                const total = ((performance.now() - t0) / 1000).toFixed(1);
+                const input = document.getElementById('user-input');
+                input.value = d.texto;
+                if (d.confiable) {
+                    vozEstado(`Entendido en ${total} s: "${d.texto}"`);
+                    _voz.porVoz = true;
+                    await sendMessage();
+                } else {
+                    vozEstado('Revisa el texto dictado y presiona enviar si esta correcto.');
+                    donosoToast('No estoy seguro de haber entendido bien. Revisa el texto antes de enviarlo.', 'warning', 'Revisa el dictado', 8000);
+                    input.focus();
+                }
+            } catch (e) {
+                vozEstado('');
+                donosoToast('No se pudo transcribir: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
         cargarHistorial();
+        initVoz();
 
     </script>
 </body>

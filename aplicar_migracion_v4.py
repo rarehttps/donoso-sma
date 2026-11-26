@@ -12,11 +12,13 @@ Uso:
 """
 import sqlite3
 
+import proteccion_datos
+
 DB_PATH = "restaurante.db"
 
 
 def main():
-    conexion = sqlite3.connect(DB_PATH)
+    conexion = proteccion_datos.conectar(DB_PATH)
     cur = conexion.cursor()
 
     cur.execute("PRAGMA table_info(pedidos)")
